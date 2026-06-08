@@ -1,10 +1,8 @@
-from pydantic import BaseModel, Field
 from typing import List
-from .camera import CameraMetadata
+from pydantic import BaseModel, Field
+from domain.camera import CameraMetadata
+from domain.detection import DetectionSpecification
 
-class DetectionSpecification(BaseModel):
-    detection_type: str = Field(..., description="Type of AI model to apply, e.g., poultry, face")
-    ai_fps: int = Field(3, description="Sampling rate (frames per second) for this specific model")
 
 class CameraConfiguration(BaseModel):
     camera: CameraMetadata

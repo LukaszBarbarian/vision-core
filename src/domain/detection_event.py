@@ -2,15 +2,14 @@ from pydantic import BaseModel, Field
 import datetime
 
 class BoundingBox(BaseModel):
-    x1: int
-    y1: int
-    x2: int
-    y2: int
+    x1: float
+    y1: float
+    x2: float
+    y2: float
 
 class DetectionEvent(BaseModel):
     camera_id: str
     detection_type: str
     confidence: float
     bbox: BoundingBox
-    # Automatycznie wbija aktualny czas przy tworzeniu obiektu
-    timestamp: datetime.datetime = Field(default_factory=datetime.datetime.now)
+    timestamp: datetime.datetime = Field(default_factory=lambda: datetime.now(datetime.timezone.utc))

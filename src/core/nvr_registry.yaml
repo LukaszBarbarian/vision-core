@@ -5,10 +5,11 @@ cameras:
       manufacturer: "ezviz"
       url: "rtsp://admin:${RTSP_PASS_H6C}@192.168.8.51:554/h264/ch1/main/av_stream"
       resolution: "1080p"
-    active: true
+    active: false
     detections:
       - detection_type: "poultry"
         ai_fps: 3
+        classes: ["cat", "bird", "person"]
     archive: true
 
   - camera:
@@ -17,7 +18,7 @@ cameras:
       manufacturer: "ezviz"
       url: "rtsp://admin:${RTSP_PASS_H8C}@192.168.8.50:554/h264/ch1/main/av_stream"
       resolution: "1080p"
-    active: true
+    active: false
     detections:
       - detection_type: "poultry"
         ai_fps: 3
@@ -29,8 +30,10 @@ cameras:
       manufacturer: "hikvision"
       url: "rtsp://admin:${RTSP_PASS_NVR}@192.168.8.10:554/Streaming/Channels/101"
       resolution: "1080p"
-    active: true
-    detections: []
+    active: false
+    detections:
+      - detection_type: "car_detection"
+        ai_fps: 2
     archive: false
 
   - camera:
@@ -40,7 +43,9 @@ cameras:
       url: "rtsp://admin:${RTSP_PASS_NVR}@192.168.8.10:554/Streaming/Channels/301"
       resolution: "1080p"
     active: false
-    detections: []
+    detections:
+      - detection_type: "car_detection"
+        ai_fps: 2
     archive: false
 
   - camera:
@@ -50,7 +55,9 @@ cameras:
       url: "rtsp://admin:${RTSP_PASS_NVR}@192.168.8.10:554/Streaming/Channels/401"
       resolution: "1080p"
     active: false
-    detections: []
+    detections:
+      - detection_type: "car_detection"
+        ai_fps: 2
     archive: false
 
   - camera:
@@ -59,6 +66,8 @@ cameras:
       manufacturer: "hikvision"
       url: "rtsp://admin:${RTSP_PASS_NVR}@192.168.8.10:554/Streaming/Channels/501"
       resolution: "1080p"
-    active: false
-    detections: []
+    active: true
+    detections:
+      - detection_type: "car_detection"
+        ai_fps: 2
     archive: false

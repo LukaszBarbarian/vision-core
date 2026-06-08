@@ -1,7 +1,7 @@
 import datetime
 import numpy as np
 from typing import List
-from config.models.detection_event import DetectionEvent
+from domain.detection_event import DetectionEvent
 
 class FrameContext:
     """
