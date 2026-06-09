@@ -2,12 +2,13 @@ import uvicorn
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-
-from api.routers.stream_router import router as stream_router
+from api.routers.stream_router import router
 from core.orchestrator import AppOrchestrator
 from core.settings import Settings
 
-
+import ssl
+# Wyłączenie sprawdzania certyfikatów SSL przy pobieraniu modeli
+ssl._create_default_https_context = ssl._create_unverified_context
 
 
 
@@ -37,7 +38,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.include_router(stream_router)
+app.include_router(router)
 
 
 @app.get("/health")

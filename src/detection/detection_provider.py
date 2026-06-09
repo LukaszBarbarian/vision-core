@@ -18,6 +18,12 @@ class DetectorProvider:
                 self._detectors[detection_type] = CarDetector(self._model_provider)
             elif detection_type == "poultry_detection":
                 self._detectors[detection_type] = PoultryDetector(self._model_provider)
+            elif detection_type == "anpr_detection":
+                from detection.detectors.anpr_detector import AnprDetector
+                self._detectors[detection_type] = AnprDetector(self._model_provider)
+            elif detection_type == "chicken_detection":
+                from detection.detectors.chicken_detector import ChickenDetector
+                self._detectors[detection_type] = ChickenDetector(self._model_provider)
             else:
                 raise ValueError(f"Unknown detection type configured: {detection_type}")
                 
