@@ -4,6 +4,7 @@ from detection.detection_manager import DetectionManager
 from detection.model_provider import ModelProvider
 from messaging.event_bus import EventBus
 from messaging.frame_bus import FrameBus
+from archive.writer import ArchiveWriter 
 
 
 class AppOrchestrator:
@@ -28,6 +29,8 @@ class AppOrchestrator:
             model_provider=self.model_provider,
             settings=settings
         )
+        
+        self.archive_writer = ArchiveWriter(event_bus=self.event_bus)
 
         self.running = False
 
@@ -40,8 +43,11 @@ class AppOrchestrator:
         await self.camera_manager.start_all()
         await self.detection_manager.start()
 
-        # NOWOŚĆ: Odpalamy asynchronicznego konsumenta zdarzeń
+        # Odpalamy asynchronicznego konsumenta zdarzeń (Twoje printy w konsoli)
         self._event_consumer_task = asyncio.create_task(self._listen_to_events())
+        
+        # 💾 NOWOŚĆ: Odpalamy niezależne zadanie zapisu do plików CSV
+        self._archive_writer_task = asyncio.create_task(self.archive_writer.run())
 
         print("[Orchestrator] Startup complete.")
 
@@ -50,9 +56,13 @@ class AppOrchestrator:
             return
         print("[Orchestrator] Stopping systems...")
         
-        # Anulujemy zadanie nasłuchiwania zdarzeń
+        # Anulujemy zadanie nasłuchiwania zdarzeń w konsoli
         if hasattr(self, '_event_consumer_task'):
             self._event_consumer_task.cancel()
+            
+        # 💾 NOWOŚĆ: Grzecznie anulujemy zadanie zapisu plików na dysku
+        if hasattr(self, '_archive_writer_task'):
+            self._archive_writer_task.cancel()
 
         await self.camera_manager.stop_all()
         await self.detection_manager.stop()
@@ -61,7 +71,6 @@ class AppOrchestrator:
 
     async def _listen_to_events(self):
         """Nasłuchuje szyny zdarzeń i reaguje na wykryte obiekty."""
-        # Subskrybujemy temat "detections", na który publikuje DetectionWorker
         queue = self.event_bus.subscribe("detections")
         
         try:
@@ -74,7 +83,6 @@ class AppOrchestrator:
                 if count > 0:
                     print(f"🚨 [AI ALERT] Kamera: {camera_id} | Wykryto: {det_type} | Ilość: {count}")
                 else:
-                    # Log techniczny, żebyś widział, że system żyje i analizuje
                     print(f"🔍 [AI Spokój] Kamera: {camera_id} | Brak obiektów typu {det_type}")
                     
         except asyncio.CancelledError:

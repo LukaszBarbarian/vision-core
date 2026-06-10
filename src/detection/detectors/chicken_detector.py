@@ -7,9 +7,7 @@ from detection.model_provider import ModelProvider
 
 class ChickenDetector(BaseDetector):
     def __init__(self, model_provider: ModelProvider):
-        # Korzystamy z tego samego, załadowanego już do pamięci modelu
         self._model = model_provider.get_model("yolov8n.pt")
-        # W uniwersum COCO / YOLO: 14 to klasa 'bird'
         self._chicken_classes = [14] 
 
     def execute(self, frame_data: np.ndarray) -> tuple[list, np.ndarray]:
@@ -17,8 +15,14 @@ class ChickenDetector(BaseDetector):
             print("⚠️ [ChickenDetector] Otrzymano PUSTĄ klatkę!")
             return [], frame_data
 
-        # Wywołujemy model tylko dla klasy ptaków
-        results = self._model(frame_data, classes=self._chicken_classes, conf=0.25, verbose=False)        
+
+        results = self._model(
+                frame_data, 
+                classes=self._chicken_classes, 
+                conf=0.15, 
+                imgsz=1280, 
+                verbose=False)
+        
         annotated_frame = frame_data.copy()
         
         if results and len(results[0].boxes) > 0:

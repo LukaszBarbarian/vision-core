@@ -1,7 +1,6 @@
 import numpy as np
 from detection.detectors.base import BaseDetector
 from detection.detectors.car_detector import CarDetector
-from detection.detectors.poultry_detector import PoultryDetector
 from src.detection.model_provider import ModelProvider
 
 
@@ -16,8 +15,6 @@ class DetectorProvider:
         if detection_type not in self._detectors:
             if detection_type == "car_detection":
                 self._detectors[detection_type] = CarDetector(self._model_provider)
-            elif detection_type == "poultry_detection":
-                self._detectors[detection_type] = PoultryDetector(self._model_provider)
             elif detection_type == "anpr_detection":
                 from detection.detectors.anpr_detector import AnprDetector
                 self._detectors[detection_type] = AnprDetector(self._model_provider)
