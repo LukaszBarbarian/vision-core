@@ -1,89 +1,324 @@
+import re
 import cv2
 import numpy as np
 import easyocr
 
 from detection.detectors.base import BaseDetector
-from detection.model_provider import ModelProvider
+from detection.model_provider import DetectionModelProvider
+from detection.detection_type import DetectionType
 
-# 🎭 Klasy imitujące YOLO, żeby generyczny worker poprawnie zliczał wyniki
-class MockBox:
-    def __init__(self, cls_id: int):
-        self.cls = [cls_id]
-
-class MockResult:
-    def __init__(self, boxes_list: list):
-        self.boxes = boxes_list
+from domain.detection_result import DetectionResult
 
 
 class AnprDetector(BaseDetector):
-    def __init__(self, model_provider: ModelProvider):
-        print("⏳ [AnprDetector] Inicjalizacja potoku hybrydowego (YOLOv8 + EasyOCR)...")
-        
-        # 1. Pobieramy ten sam model, którego używa CarDetector
-        self._model = model_provider.get_model("yolov8n.pt")
-        self._vehicle_classes = [2, 3, 5, 7]  # car, motorcycle, bus, truck
-        
-        # 2. Odpalamy OCR dla polskich i angielskich znaków
-        self._reader = easyocr.Reader(['pl', 'en'], gpu=True)
 
-    def execute(self, frame_data: np.ndarray) -> tuple[list, np.ndarray]:
+    def __init__(
+        self,
+        model_provider: DetectionModelProvider
+    ):
+        self._car_model = model_provider.get_model(
+            DetectionType.CAR
+        )
+
+        self._plate_model = model_provider.get_model(
+            DetectionType.LICENSE_PLATE
+        )
+
+        self._reader = easyocr.Reader(
+            ['pl', 'en'],
+            gpu=True
+        )
+
+        self._vehicle_classes = [
+            2, 3, 5, 7
+        ]
+
+    def _clean(self, text: str) -> str:
+        return re.sub(
+            r'[^A-Z0-9]',
+            '',
+            text.upper().strip()
+        )
+
+    def _valid(self, text: str) -> bool:
+
+        length = len(text)
+
+        if length == 8:
+
+            suffix = text[3:]
+
+            valid_patterns = [
+                r'^\d{5}$',
+                r'^\d{4}[A-Z]$',
+                r'^\d{3}[A-Z]{2}$',
+                r'^\d[A-Z]\d{3}$',
+                r'^\d{2}[A-Z]\d{2}$',
+                r'^\d[A-Z]{2}\d{2}$',
+                r'^\d{2}[A-Z]{2}\d$'
+            ]
+
+            return any(
+                re.match(p, suffix)
+                for p in valid_patterns
+            )
+
+        elif length == 7:
+
+            suffix_5 = text[2:]
+            suffix_4 = text[3:]
+
+            patterns_5 = [
+                r'^\d{5}$',
+                r'^\d{4}[A-Z]$',
+                r'^\d{3}[A-Z]{2}$',
+                r'^[A-Z]\d{3}[A-Z]$'
+            ]
+
+            patterns_4 = [
+                r'^\d{4}$',
+                r'^\d{3}[A-Z]$',
+                r'^\d{2}[A-Z]{2}$',
+                r'^[A-Z]\d{3}$'
+            ]
+
+            return (
+                any(
+                    re.match(p, suffix_5)
+                    for p in patterns_5
+                )
+                or
+                any(
+                    re.match(p, suffix_4)
+                    for p in patterns_4
+                )
+            )
+
+        return False
+
+    def execute(
+        self,
+        frame_data: np.ndarray,
+        context: dict
+    ) -> list[DetectionResult]:
+
         if frame_data is None or frame_data.size == 0:
-            return [], frame_data
+            return []
 
-        annotated_frame = frame_data.copy()
-        detected_plates_count = 0
+        car_boxes = context.get(
+            "detected_cars"
+        )
 
-        # 🔥 KROK 1: Lokalizujemy pojazdy za pomocą YOLO (wyszukujemy tylko strefy z autami)
-        yolo_results = self._model(frame_data, classes=self._vehicle_classes, conf=0.25, verbose=False)        
-        
-        if yolo_results and len(yolo_results[0].boxes) > 0:
-            for box in yolo_results[0].boxes:
-                # Pobieramy współrzędne wykrytego samochodu na pełnym kadrze 2K
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
-                
-                # Zabezpieczenie, żeby indeksy nie wyszły poza matrycę np.ndarray
-                x1, y1 = max(0, x1), max(0, y1)
-                x2, y2 = min(frame_data.shape[1], x2), min(frame_data.shape[0], y2)
+        if car_boxes is None:
 
-                # 🔥 KROK 2: Wycinamy prostokąt z SAMYM samochodem (Crop)
-                # Dzięki temu odcinamy resztę kadru, w tym nieszczęsną datę i godzinę!
-                car_crop = frame_data[y1:y2, x1:x2]
-                if car_crop.size == 0:
+            results = self._car_model(
+                frame_data,
+                classes=self._vehicle_classes,
+                conf=0.3,
+                imgsz=1280,
+                verbose=False
+            )
+
+            car_boxes = (
+                results[0].boxes
+                if (
+                    results
+                    and len(results[0].boxes) > 0
+                )
+                else []
+            )
+
+        if not car_boxes:
+            return []
+
+        clean_source = context.get(
+            "clean_frame",
+            frame_data
+        )
+
+        detections = []
+
+        for car_box in car_boxes:
+
+            cx1, cy1, cx2, cy2 = map(
+                int,
+                car_box.xyxy[0]
+            )
+
+            cx1 = max(0, cx1)
+            cy1 = max(0, cy1)
+
+            cx2 = min(
+                clean_source.shape[1],
+                cx2
+            )
+
+            cy2 = min(
+                clean_source.shape[0],
+                cy2
+            )
+
+            car_crop = clean_source[
+                cy1:cy2,
+                cx1:cx2
+            ]
+
+            if car_crop.size == 0:
+                continue
+
+            plate_results = self._plate_model(
+                car_crop,
+                conf=0.2,
+                verbose=False
+            )
+
+            if (
+                not plate_results
+                or len(
+                    plate_results[0].boxes
+                ) == 0
+            ):
+                continue
+
+            for plate_box in plate_results[0].boxes:
+
+                px1, py1, px2, py2 = map(
+                    int,
+                    plate_box.xyxy[0]
+                )
+
+                plate_crop = car_crop[
+                    py1:py2,
+                    px1:px2
+                ]
+
+                if plate_crop.size == 0:
                     continue
 
-                # OPCJONALNIE: Rysujemy bardzo cienką zieloną linię wokół auta, żeby widzieć strefę analizy
-                cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
+                target_h = 120
 
-                # 🔥 KROK 3: Skupiamy wzrok OCR wyłącznie na wyciętym samochodzie
-                ocr_results = self._reader.readtext(car_crop)
+                scale = (
+                    target_h
+                    / plate_crop.shape[0]
+                )
 
-                for (bbox, text, prob) in ocr_results:
-                    # Czyszczenie i standaryzacja tekstu
-                    clean_text = text.upper().replace(" ", "").replace("-", "").strip()
-                    
-                    # Heurystyka: tablica ma od 4 do 8 znaków i musi zawierać przynajmniej jedną cyfrę
-                    if 4 <= len(clean_text) <= 8 and any(char.isdigit() for char in clean_text):
-                        detected_plates_count += 1
-                        
-                        # 🔥 KROK 4: Mapowanie współrzędnych wstecznych (z wycinka na pełny kadr 2K)
-                        # Punkty w 'bbox' są relatywne do lewego górnego rogu wycinka (który w 2K ma współrzędne x1, y1)
-                        p0 = (int(bbox[0][0] + x1), int(bbox[0][1] + y1))
-                        p1 = (int(bbox[1][0] + x1), int(bbox[1][1] + y1))
-                        p2 = (int(bbox[2][0] + x1), int(bbox[2][1] + y1))
-                        p3 = (int(bbox[3][0] + x1), int(bbox[3][1] + y1))
-                        
-                        # Rysujemy grubą, drapieżną czerwoną ramkę dokładnie wokół tablicy na głównym obrazie
-                        pts = np.array([p0, p1, p2, p3], np.int32).reshape((-1, 1, 2))
-                        cv2.polylines(annotated_frame, [pts], True, (0, 0, 255), 3)
-                        
-                        # Wypisujemy rejestrację bezpośrednio nad znalezioną tablicą
-                        cv2.putText(annotated_frame, f"REJ: {clean_text} ({int(prob*100)}%)", (p0[0], p0[1] - 10), 
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2, cv2.LINE_AA)
-                        
-                        print(f"🎯 [ANPR SUCCESS] Kamera wykryła tablicę: {clean_text} (Pewność: {prob:.2f})")
+                plate_resized = cv2.resize(
+                    plate_crop,
+                    None,
+                    fx=scale,
+                    fy=scale,
+                    interpolation=cv2.INTER_CUBIC
+                )
 
-        # Pakujemy wynik w atrapę struktury YOLO dla zachowania kompatybilności z Workerem
-        mocked_boxes = [MockBox(cls_id=99) for _ in range(detected_plates_count)]
-        mocked_results_list = [MockResult(boxes_list=mocked_boxes)]
+                gray = cv2.cvtColor(
+                    plate_resized,
+                    cv2.COLOR_BGR2GRAY
+                )
 
-        return mocked_results_list, annotated_frame
+                clahe = cv2.createCLAHE(
+                    clipLimit=3.0,
+                    tileGridSize=(8, 8)
+                )
+
+                gray = clahe.apply(gray)
+
+                processed_plate = (
+                    cv2.bilateralFilter(
+                        gray,
+                        d=9,
+                        sigmaColor=75,
+                        sigmaSpace=75
+                    )
+                )
+
+                ocr_results = self._reader.readtext(
+                    processed_plate,
+                    detail=1,
+                    paragraph=False,
+                    allowlist='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+                    width_ths=0.7
+                )
+
+                if not ocr_results:
+                    continue
+
+                ocr_results_sorted = sorted(
+                    ocr_results,
+                    key=lambda r: r[0][0][0]
+                )
+
+                combined_text = ""
+                conf_scores = []
+
+                for (
+                    bbox,
+                    text,
+                    conf
+                ) in ocr_results_sorted:
+
+                    if conf < 0.15:
+                        continue
+
+                    cleaned = self._clean(text)
+
+                    if cleaned:
+                        combined_text += cleaned
+                        conf_scores.append(conf)
+
+                best_text = None
+                best_conf = 0.0
+
+                if self._valid(combined_text):
+
+                    best_text = combined_text
+
+                    best_conf = (
+                        sum(conf_scores)
+                        / len(conf_scores)
+                        if conf_scores
+                        else 0.0
+                    )
+
+                else:
+
+                    for (
+                        bbox,
+                        text,
+                        conf
+                    ) in ocr_results_sorted:
+
+                        cleaned = self._clean(
+                            text
+                        )
+
+                        if (
+                            conf >= 0.3
+                            and self._valid(
+                                cleaned
+                            )
+                        ):
+                            if conf > best_conf:
+                                best_conf = conf
+                                best_text = cleaned
+
+                if best_text is None:
+                    continue
+
+                global_x1 = cx1 + px1
+                global_y1 = cy1 + py1
+                global_x2 = cx1 + px2
+                global_y2 = cy1 + py2
+
+                detections.append(
+                    DetectionResult(
+                        detection_type="anpr_detection",
+                        x1=global_x1,
+                        y1=global_y1,
+                        x2=global_x2,
+                        y2=global_y2,
+                        confidence=best_conf,
+                        label=best_text
+                    )
+                )
+
+        return detections

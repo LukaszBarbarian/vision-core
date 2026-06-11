@@ -1,22 +1,19 @@
 import datetime
 import numpy as np
-from typing import List
-from domain.detection_event import DetectionEvent
+
+from domain.detection_result import DetectionResult
+
 
 class FrameContext:
-    """
-    Carries the raw video frame matrix along with its structural metadata 
-    and appended AI detection results.
-    """
-    def __init__(self, camera_id: str, frame_id: int, frame_data: np.ndarray):
+    def __init__(self, camera_id: str, frame_id: int, frame_data, detections=None):
         self.camera_id = camera_id
         self.frame_id = frame_id
-        self.timestamp = datetime.datetime.now()
-        self.frame_data = frame_data  # NumPy matrix (BGR format)
-        
-        # Pojemnik na wyniki analizy AI dla tej konkretnej klatki
-        self.detections: List[DetectionEvent] = []
+        self.frame_data = frame_data
+        self.detections = detections if detections is not None else []
 
     @property
-    def is_empty(self) -> bool:
-        return self.frame_data is None or self.frame_data.size == 0
+    def is_empty(self):
+        return (
+            self.frame_data is None
+            or self.frame_data.size == 0
+        )

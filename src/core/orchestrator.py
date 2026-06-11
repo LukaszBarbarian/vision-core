@@ -1,7 +1,7 @@
 import asyncio
 from cameras.camera_manager import CameraManager
 from detection.detection_manager import DetectionManager
-from detection.model_provider import ModelProvider
+from detection.model_provider import DetectionModelProvider
 from messaging.event_bus import EventBus
 from messaging.frame_bus import FrameBus
 from archive.writer import ArchiveWriter 
@@ -15,7 +15,7 @@ class AppOrchestrator:
         self.frame_bus = FrameBus()
         self.event_bus = EventBus()
 
-        self.model_provider = ModelProvider()
+        self.model_provider = DetectionModelProvider()
 
         self.camera_manager = CameraManager(
             frame_bus=self.frame_bus,
