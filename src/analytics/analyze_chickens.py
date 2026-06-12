@@ -35,11 +35,18 @@ class ChickenDataAnalyzer:
             try:
                 boxes = json.loads(row['bounding_boxes'])
                 for box in boxes:
-                    x1, y1, x2, y2, _ = box
+                    # Pobieramy wartości bezpośrednio po kluczach ze słownika
+                    x1 = box["x1"]
+                    y1 = box["y1"]
+                    x2 = box["x2"]
+                    y2 = box["y2"]
+                    
                     # Wyznaczamy geometryczny środek kury
                     self.center_xs.append((x1 + x2) / 2)
                     self.center_ys.append((y1 + y2) / 2)
-            except (json.JSONDecodeError, TypeError):
+            except (json.JSONDecodeError, TypeError, KeyError):
+                # Dodałem 'KeyError', żeby skrypt nie padł, jeśli z jakiegoś powodu
+                # detektor wypluje słownik bez klucza "x1"
                 continue
 
     def plot_activity_timeline(self, ax):
@@ -87,3 +94,54 @@ class ChickenDataAnalyzer:
         else:
             plt.show()
 
+
+
+    def plot_spatial_heatmap_on_frame(
+        self,
+        ax,
+        background_path: str,
+        detection_type: str | None = None,
+        scene_id: str | None = None,
+    ):
+        import cv2
+        import seaborn as sns
+
+        df = self.df.copy()
+
+        if detection_type:
+            df = df[df["detection_type"] == detection_type]
+
+        if scene_id:
+            df = df[df["scene_id"] == scene_id]
+
+        if df.empty:
+            ax.text(0.5, 0.5, "Brak danych dla tej sceny", ha="center", va="center")
+            return
+
+        bg = cv2.imread(background_path)
+        if bg is not None:
+            bg = cv2.cvtColor(bg, cv2.COLOR_BGR2RGB)
+            ax.imshow(bg)
+
+        xs = df["cx"].astype(float)
+        ys = df["cy"].astype(float)
+
+        sns.kdeplot(
+            x=xs,
+            y=ys,
+            fill=True,
+            thresh=0.05,
+            alpha=0.45,
+            ax=ax
+        )
+
+        ax.scatter(xs, ys, s=6, alpha=0.25)
+
+        frame_width = int(df["frame_width"].dropna().iloc[0])
+        frame_height = int(df["frame_height"].dropna().iloc[0])
+
+        ax.set_xlim(0, frame_width)
+        ax.set_ylim(frame_height, 0)
+        ax.set_title(f"Heatmapa: {detection_type or 'wszystko'} | {scene_id or 'bez scene_id'}")
+        ax.set_xlabel("X [px]")
+        ax.set_ylabel("Y [px]")

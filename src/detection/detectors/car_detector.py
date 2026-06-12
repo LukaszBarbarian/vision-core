@@ -86,3 +86,13 @@ class CarDetector(BaseDetector):
 
 
         return detections
+    
+
+
+
+    def get_color(cls) -> tuple[int, int, int]:
+        return (0, 255, 255)  # żółty BGR
+
+    @classmethod
+    def get_display_name(cls) -> str:
+        return "Pojazd"

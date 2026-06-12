@@ -20,6 +20,7 @@ async def lifespan(app: FastAPI):
     app.state.orchestrator = orchestrator
     app.state.frame_bus = orchestrator.frame_bus
     app.state.settings = settings
+    app.state.detector_provider = orchestrator.detection_manager.detector_provider
 
     print("[SYSTEM] Starting Vision Core...")
 

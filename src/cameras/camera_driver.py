@@ -1,6 +1,8 @@
 import asyncio
-import av
 import time
+from datetime import datetime
+
+import av
 
 from cameras.frame_context import FrameContext
 
@@ -32,12 +34,19 @@ class CameraDriver:
 
                 stream = container.streams.video[0]
 
-                print(f"[{camera_id}] Stream opened.")
+                stream_session_id = (
+                    f"{camera_id}-"
+                    f"{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+                )
+
+                print(
+                    f"[{camera_id}] Stream opened. "
+                    f"session={stream_session_id}"
+                )
 
                 frame_id = 0
 
                 for frame in container.decode(stream):
-
                     if not self.running:
                         break
 
@@ -46,13 +55,14 @@ class CameraDriver:
                     ctx = FrameContext(
                         camera_id=camera_id,
                         frame_id=frame_id,
-                        frame_data=img
+                        frame_data=img,
+                        timestamp=time.time(),
+                        stream_session_id=stream_session_id,
                     )
 
                     await self.frame_bus.publish(camera_id, ctx)
 
                     frame_id += 1
-
                     await asyncio.sleep(0)
 
             except Exception as ex:
@@ -64,10 +74,9 @@ class CameraDriver:
                 if container:
                     try:
                         container.close()
-                    except:
+                    except Exception:
                         pass
 
-            # mały backoff nawet przy clean exit streama
             await asyncio.sleep(0.5)
 
         print(f"[{camera_id}] Driver stopped.")

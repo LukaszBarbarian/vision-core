@@ -6,6 +6,7 @@ cameras:
       url: "rtsp://admin:${RTSP_PASS_H6C}@192.168.8.51:554/h264/ch1/main/av_stream"
       resolution: "1080p"
     active: false
+    scene_tracking: true
     detections:
       - detection_type: "chicken_detection"
         ai_fps: 4
@@ -18,8 +19,10 @@ cameras:
       url: "rtsp://admin:${RTSP_PASS_H8C}@192.168.8.50:554/h264/ch1/main/av_stream"
       resolution: "1080p"
     active: true
+    scene_tracking: true
     detections:
       - detection_type: "chicken_detection"
+        ai_fps: 4
       - detection_type: "person_detection"
         ai_fps: 4
     archive: true
@@ -31,6 +34,7 @@ cameras:
       url: "rtsp://admin:${RTSP_PASS_NVR}@192.168.8.10:554/Streaming/Channels/101"
       resolution: "1080p"
     active: false
+    scene_tracking: false
     detections:
       - detection_type: "anpr_detection"
         ai_fps: 2
@@ -43,8 +47,10 @@ cameras:
       url: "rtsp://admin:${RTSP_PASS_NVR}@192.168.8.10:554/Streaming/Channels/301"
       resolution: "1080p"
     active: false
+    scene_tracking: false
     detections:
       - detection_type: "car_detection"
+        ai_fps: 2
       - detection_type: "anpr_detection"
         ai_fps: 2
     archive: false
@@ -56,10 +62,11 @@ cameras:
       url: "rtsp://admin:${RTSP_PASS_NVR}@192.168.8.10:554/Streaming/Channels/401"
       resolution: "1080p"
     active: false
+    scene_tracking: false
     detections:
       - detection_type: "car_detection"
+        ai_fps: 2
       - detection_type: "anpr_detection"
-
         ai_fps: 2
     archive: false
 
@@ -69,10 +76,13 @@ cameras:
       manufacturer: "hikvision"
       url: "rtsp://admin:${RTSP_PASS_NVR}@192.168.8.10:554/Streaming/Channels/501"
       resolution: "1080p"
-    active: false
+    active: true
+    scene_tracking: false
     detections:
       - detection_type: "car_detection"
+        ai_fps: 2
       - detection_type: "anpr_detection"
+        ai_fps: 2
       - detection_type: "person_detection"
         ai_fps: 3
     archive: false

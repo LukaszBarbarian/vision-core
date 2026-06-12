@@ -322,3 +322,14 @@ class AnprDetector(BaseDetector):
                 )
 
         return detections
+    
+
+
+
+    @classmethod
+    def get_color(cls) -> tuple[int, int, int]:
+        return (255, 255, 0)  # cyan BGR
+
+    @classmethod
+    def get_display_name(cls) -> str:
+        return "Tablica"
