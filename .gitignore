@@ -5,6 +5,7 @@ __pycache__/
 *.pyc
 .vscode/
 archive_logs/
+data/
 *.xls
 *.xlsx
 *.csv

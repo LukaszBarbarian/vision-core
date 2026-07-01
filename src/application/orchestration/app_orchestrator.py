@@ -9,6 +9,7 @@ from application.orchestration.detection_manager import DetectionManager
 from application.orchestration.speech_manager import SpeechManager
 
 from application.runtime.audio_overlay_state import AudioOverlayState
+from infrastructure.ai_detection.face_identity_store import FaceIdentityStore
 from infrastructure.ai_detection.providers.model_provider import DetectionModelProvider
 from infrastructure.archive.archive_writer import ArchiveWriter
 
@@ -17,7 +18,9 @@ from infrastructure.automation.controllers.gate_controler import GateControllerW
 from infrastructure.automation.multimodal_gate_automation_engine import (
     MultimodalGateAutomationEngine,
 )
-from infrastructure.speech.recognizer.faster_whisper_recognizer import FasterWhisperSpeechRecognizer
+from infrastructure.speech.recognizer.faster_whisper_recognizer import (
+    FasterWhisperSpeechRecognizer,
+)
 
 
 class AppOrchestrator:
@@ -30,6 +33,15 @@ class AppOrchestrator:
         self.event_bus = EventBus()
 
         self.audio_overlay_state = AudioOverlayState()
+
+        self.face_identity_store = FaceIdentityStore(
+            known_faces_dir="data/faces/known",
+            index_path="data/faces/known_faces.pkl",
+            display_names_path="data/faces/display_names.json",
+            tolerance=0.48,
+            auto_reload=True,
+            debug=True,
+        )
 
         self.model_provider = DetectionModelProvider()
 
@@ -45,6 +57,7 @@ class AppOrchestrator:
             event_bus=self.event_bus,
             model_provider=self.model_provider,
             settings=settings,
+            face_identity_store=self.face_identity_store,
         )
 
         self.speech_manager = SpeechManager(
@@ -81,6 +94,8 @@ class AppOrchestrator:
         self.running = True
 
         print("[Orchestrator] Starting systems...")
+
+        await self._start_face_identity_store()
 
         self._start_rule_engines()
         self._start_multimodal_gate_engines()
@@ -159,6 +174,37 @@ class AppOrchestrator:
         self._background_tasks.clear()
 
         print("[Orchestrator] Shutdown complete.")
+
+    async def _start_face_identity_store(self):
+        if not self._has_face_detection_configured():
+            print("[FaceIdentityStore] skipped: face_detection is not configured")
+            return
+
+        print("[FaceIdentityStore] starting...")
+
+        await asyncio.to_thread(
+            self.face_identity_store.start,
+            rebuild_if_missing=True,
+            rebuild_if_stale=True,
+        )
+
+    def _has_face_detection_configured(self) -> bool:
+        detection_configs = getattr(self.settings, "detection_configs", {}) or {}
+
+        for camera_id, specs in detection_configs.items():
+            config = self.settings.registry.get(camera_id)
+
+            if config is not None and not getattr(config.camera, "active", False):
+                continue
+
+            for spec in specs or []:
+                detection_type = getattr(spec, "detection_type", spec)
+                detection_type = getattr(detection_type, "value", detection_type)
+
+                if str(detection_type) == "face_detection":
+                    return True
+
+        return False
 
     def _start_rule_engines(self):
         for cam_id, config in self.settings.registry.items():

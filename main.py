@@ -1,15 +1,15 @@
-import uvicorn
-
+import ssl
 from contextlib import asynccontextmanager
+
+import uvicorn
 from fastapi import FastAPI
+
 from application.orchestration.app_orchestrator import AppOrchestrator
 from infrastructure.config.settings import Settings
 from presentation.api.routers.analytics import router as analytics_router
 from presentation.api.routers.streaming import router as cameras_router
 
-import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
-
 
 
 @asynccontextmanager
@@ -18,8 +18,15 @@ async def lifespan(app: FastAPI):
     orchestrator = AppOrchestrator(settings=settings)
 
     app.state.orchestrator = orchestrator
-    app.state.frame_bus = orchestrator.frame_bus
     app.state.settings = settings
+
+    app.state.frame_bus = orchestrator.frame_bus
+    app.state.audio_bus = orchestrator.audio_bus
+    app.state.event_bus = orchestrator.event_bus
+
+    app.state.audio_overlay_state = orchestrator.audio_overlay_state
+    app.state.face_identity_store = orchestrator.face_identity_store
+
     app.state.detector_provider = orchestrator.detection_manager.detector_provider
 
     print("[SYSTEM] Starting Vision Core...")
@@ -46,7 +53,7 @@ app.include_router(cameras_router)
 @app.get("/health")
 async def health():
     return {
-        "status": "ok"
+        "status": "ok",
     }
 
 
@@ -56,4 +63,5 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8000,
         reload=True,
+        access_log=False,
     )
