@@ -1,0 +1,115 @@
+cameras:
+  - camera:
+      id: "h6c"
+      name: "Coop - Inside (H6c)"
+      manufacturer: "ezviz"
+      url: "rtsp://admin:${RTSP_PASS_NVR}@192.168.254.4:554/Streaming/Channels/101"
+      #url: "rtsp://admin:${RTSP_PASS_H6C}@192.168.8.51:554/h264/ch1/main/av_stream"
+      resolution: "1080p"
+      active: false
+      audio_enabled: true
+      scene_tracking: true
+    detections:
+      - detection_type: "chicken_detection"
+        ai_fps: 4
+    archive: false
+
+  - camera:
+      id: "h8c"
+      name: "Coop - Run (H8c)"
+      manufacturer: "ezviz"
+      url: "rtsp://admin:${RTSP_PASS_NVR}@192.168.254.4:554/Streaming/Channels/601"
+      #url: "rtsp://admin:${RTSP_PASS_H8C}@192.168.8.50:554/h264/ch1/main/av_stream"
+      resolution: "1080p"
+      active: true
+      audio_enabled: true
+      scene_tracking: true
+    detections:
+      - detection_type: "chicken_detection"
+        ai_fps: 10
+    archive: true
+
+  - camera:
+      id: "dom_c4"
+      name: "NVR - Channel 1"
+      manufacturer: "hikvision"
+      url: "rtsp://admin:${RTSP_PASS_NVR}@192.168.254.4:554/Streaming/Channels/201"
+      resolution: "1080p"
+      active: false
+      audio_enabled: true
+      scene_tracking: false
+    detections:
+      - detection_type: "anpr_detection"
+        ai_fps: 0.5
+    archive: false
+
+  - camera:
+      id: "dom_c2"
+      name: "NVR - Channel 3"
+      manufacturer: "hikvision"
+      url: "rtsp://admin:${RTSP_PASS_NVR}@192.168.254.4:554/Streaming/Channels/301"
+      resolution: "1080p"
+      active: false
+      audio_enabled: true
+      scene_tracking: false
+    detections:
+      - detection_type: "car_detection"
+        ai_fps: 2
+      - detection_type: "anpr_detection"
+        ai_fps: 0.5
+    archive: false
+
+  - camera:
+      id: "dom_c3"
+      name: "NVR - Channel 4"
+      manufacturer: "hikvision"
+      url: "rtsp://admin:${RTSP_PASS_NVR}@192.168.254.4:554/Streaming/Channels/401"
+      resolution: "1080p"
+      active: false
+      audio_enabled: true
+      scene_tracking: false
+    detections:
+      - detection_type: "car_detection"
+        ai_fps: 2
+      - detection_type: "anpr_detection"
+        ai_fps: 0.5
+    archive: false
+
+  - camera:
+      id: "dom_c1"
+      name: "NVR - Channel 5"
+      manufacturer: "hikvision"
+      url: "rtsp://admin:${RTSP_PASS_NVR}@192.168.254.4:554/Streaming/Channels/501"
+      resolution: "1080p"
+      active: true
+      audio_enabled: true
+      scene_tracking: false
+      motion_mask_polygon: [[200, 720], [800, 300], [1200, 300], [1280, 720]]
+      rules:
+        - name: "wjazd_brama"
+          type: "tripwire"
+          target_classes: ["car_detection"]
+          line: [[200, 500], [1000, 500]]
+          trigger_event: "GATE_APPROACH"
+
+        - name: "otworz_brame_glosowo_po_wjezdzie"
+          type: "multimodal_gate_open"
+          visual_event: "GATE_APPROACH"
+          speech_phrases:
+            - "otwórz bramę"
+            - "otworz brame"
+            - "brama otwórz"
+            - "brama otworz"
+            - "otwórz furtkę"
+            - "otworz furtke"
+          max_event_age_seconds: 8
+          cooldown_seconds: 20
+          command_event: "gate.command.open"
+    detections:
+      - detection_type: "car_detection"
+        ai_fps: 2
+      - detection_type: "anpr_detection"
+        ai_fps: 0.5
+      - detection_type: "person_detection"
+        ai_fps: 3
+    archive: false

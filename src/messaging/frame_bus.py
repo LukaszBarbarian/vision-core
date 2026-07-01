@@ -1,9 +1,0 @@
-from typing import Any
-from messaging.bus import BaseBus
-
-class FrameBus(BaseBus):
-    def __init__(self):
-        super().__init__(queue_size=1)
-
-    async def publish(self, topic: str, frame: Any):
-        await super().publish(topic, frame)
