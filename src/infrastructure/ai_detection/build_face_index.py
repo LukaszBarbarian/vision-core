@@ -62,7 +62,7 @@ def main():
         index_path=args.index,
         display_names_path=args.display_names,
         tolerance=args.tolerance,
-        debug=True,
+        debug=False,
     )
 
     count = store.rebuild_index_from_directory(

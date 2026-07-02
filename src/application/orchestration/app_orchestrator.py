@@ -40,7 +40,7 @@ class AppOrchestrator:
             display_names_path="data/faces/display_names.json",
             tolerance=0.48,
             auto_reload=True,
-            debug=True,
+            debug=False,
         )
 
         self.model_provider = DetectionModelProvider()

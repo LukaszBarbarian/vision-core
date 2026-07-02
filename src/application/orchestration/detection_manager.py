@@ -45,7 +45,7 @@ class DetectionManager:
                 event_bus=self.event_bus,
                 detector_provider=self.detector_provider,
                 specs=config.detections,
-                scene_tracking_enabled=getattr(config, "scene_tracking", False),
+                scene_tracking_enabled=getattr(config.camera, "scene_tracking", False),
             )
 
             self.workers.append(worker)
@@ -59,7 +59,7 @@ class DetectionManager:
 
             print(
                 f"[DetectionManager] Worker started: {camera_id} | "
-                f"scene_tracking={getattr(config, 'scene_tracking', False)}"
+                f"scene_tracking={getattr(config.camera, 'scene_tracking', False)}"
             )
 
     async def stop(self):

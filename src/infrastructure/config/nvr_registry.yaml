@@ -21,12 +21,12 @@ cameras:
       url: "rtsp://admin:${RTSP_PASS_NVR}@192.168.254.4:554/Streaming/Channels/601"
       #url: "rtsp://admin:${RTSP_PASS_H8C}@192.168.8.50:554/h264/ch1/main/av_stream"
       resolution: "1080p"
-      active: false
+      active: true
       audio_enabled: true
       scene_tracking: true
     detections:
       - detection_type: "chicken_detection"
-        ai_fps: 10
+        ai_fps: 5
     archive: true
 
   - camera:
@@ -49,14 +49,16 @@ cameras:
       manufacturer: "hikvision"
       url: "rtsp://admin:${RTSP_PASS_NVR}@192.168.254.4:554/Streaming/Channels/301"
       resolution: "1080p"
-      active: false
+      active: true
       audio_enabled: true
       scene_tracking: false
     detections:
       - detection_type: "car_detection"
-        ai_fps: 2
+        ai_fps: 1
       - detection_type: "anpr_detection"
         ai_fps: 1
+      - detection_type: "person_detection"
+        ai_fps: 1        
     archive: false
 
   - camera:
@@ -106,12 +108,12 @@ cameras:
           cooldown_seconds: 20
           command_event: "gate.command.open"
     detections:
-      - detection_type: "car_detection"
-        ai_fps: 1
-      - detection_type: "anpr_detection"
-        ai_fps: 1
-      - detection_type: "face_detection"
-        ai_fps: 1        
-      - detection_type: "person_detection"
-        ai_fps: 1
+    - detection_type: "car_detection"
+      ai_fps: 1
+    - detection_type: "anpr_detection"
+      ai_fps: 1
+    - detection_type: "person_detection"
+      ai_fps: 1      
+    - detection_type: "face_detection"
+      ai_fps: 1            
     archive: false

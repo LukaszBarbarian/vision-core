@@ -7,7 +7,7 @@ from infrastructure.ai_detection.detectors.base import BaseDetector
 
 class FrameRenderer:
     def __init__(self, detector_provider=None, audio_overlay_state=None):
-        self.detector_provider = detector_provider,
+        self.detector_provider = detector_provider
         self.audio_overlay_state = audio_overlay_state
 
     def render(

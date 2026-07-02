@@ -52,7 +52,7 @@ class DetectionWorker:
         # For static cameras keep a single logical scene and do not run visual
         # scene detection. For PTZ cameras set scene_tracking_enabled=True.
         self.scene_tracking_enabled = scene_tracking_enabled
-        self.scene_tracker = SceneTracker(debug=True) if scene_tracking_enabled else None
+        self.scene_tracker = SceneTracker(debug=False) if scene_tracking_enabled else None
         self.current_scene_id = (
             f"{camera_id}_scene_0000"
             if scene_tracking_enabled
@@ -122,7 +122,7 @@ class DetectionWorker:
 
 
                 context: dict[str, Any] = {
-                    "clean_frame": frame_ctx.frame_data.copy()
+                    "clean_frame": frame_ctx.frame_data
                 }
 
                 frame_height = int(frame_ctx.frame_data.shape[0])
@@ -202,7 +202,7 @@ class DetectionWorker:
                 ai_frame_ctx = FrameContext(
                     camera_id=frame_ctx.camera_id,
                     frame_id=frame_ctx.frame_id,
-                    frame_data=frame_ctx.frame_data.copy(),
+                    frame_data=frame_ctx.frame_data,
                     detections=visible_detections,
                     timestamp=frame_timestamp,
                     stream_session_id=getattr(frame_ctx, "stream_session_id", None),

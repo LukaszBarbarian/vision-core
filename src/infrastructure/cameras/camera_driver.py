@@ -234,9 +234,18 @@ class CameraDriver:
     ) -> tuple[int, AudioFifo]:
         try:
             audio_frames = packet.decode()
-        except Exception:
-            print(f"[{camera_id}] Failed to decode audio packet")
-            traceback.print_exc()
+
+        except av.error.InvalidDataError:
+            # RTSP/EZVIZ/NVR potrafią czasem wysłać uszkodzony pakiet audio.
+            # To nie jest powód do restartu kamery ani spamowania tracebackiem.
+            if self.debug_audio:
+                print(f"[{camera_id}] Dropped invalid audio packet")
+            return audio_chunk_id, audio_fifo
+
+        except Exception as ex:
+            print(f"[{camera_id}] Failed to decode audio packet: {ex}")
+            if self.debug_audio:
+                traceback.print_exc()
             return audio_chunk_id, audio_fifo
 
         for audio_frame in audio_frames:
