@@ -1,6 +1,10 @@
+from pathlib import Path
+
 from ultralytics import YOLO
 
 from domain.models.detection_type import DetectionType
+
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
 
 class DetectionModelProvider:
@@ -20,7 +24,7 @@ class DetectionModelProvider:
             DetectionType.CHICKEN: "yolov8m.pt",
             DetectionType.CAR: "yolov8n.pt",
             DetectionType.PERSON: "yolov8n.pt",
-            DetectionType.LICENSE_PLATE: "D:/projects/cv-demo7/vision-core/license_plate_detector.pt",
+            DetectionType.LICENSE_PLATE: str(PROJECT_ROOT / "license_plate_detector.pt"),
         }
 
         return mapping[detection_type]
