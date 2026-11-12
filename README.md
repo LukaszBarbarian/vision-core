@@ -150,6 +150,32 @@ Every subscriber gets a bounded `asyncio.Queue` with a **latest-wins** policy: w
 
 ---
 
+## 📊 Analytics
+
+Every archived event is also a row per bounding box in `archive_logs/detections_long.csv` (timestamp, camera, session, scene, type, label, confidence, box, snapshot path), which makes the archive easy to analyse.
+
+### Events, not frames
+
+<img src="docs/images/events_timeline.png" alt="Archived events per 10 minutes on 3 July, stacked by detection type" width="900"/>
+
+In 2.5 hours on 3 July the driveway camera decoded **182,183 frames** and the pipeline archived **327 events**, about **0.2%** of the frames. Spikes match real activity: someone walking around and moving the car before 12:00, then the car leaving and coming back around 13:00, when the ANPR detector reads the plate repeatedly.
+
+### Where vehicles are on the driveway
+
+<img src="docs/images/driveway_heatmap.png" alt="Density of vehicle ground points on the driveway with the tripwire line" width="900"/>
+
+The vehicle ground points (the same point the tripwire rule evaluates) form dense spots where the car is parked and a thin trail towards the gate. The tripwire sits across the path to the gate, clear of the parking spots, so a parked car never triggers `GATE_APPROACH`.
+
+### Coop activity
+
+<img src="docs/images/coop_analytics.png" alt="Chicken activity over time and a heat-map of favourite spots in the run" width="900"/>
+
+The `/analytics/plot` endpoint renders this view for the chicken cameras (labels in Polish): the number of hens in view over time (*Rytm dobowy kurek*) and a density map of their favourite spots in the run (*Mapa ulubionych miejsc na wybiegu*).
+
+Charts are reproducible with [`tools/make_readme_charts.py`](tools/make_readme_charts.py).
+
+---
+
 ## 🧩 Core Components Deep Dive
 
 * **`AppOrchestrator`** — composition root: builds the buses and managers, starts/stops everything from FastAPI's `lifespan`.
