@@ -169,6 +169,12 @@ The vehicle ground points (the same point the tripwire rule evaluates) form dens
 
 ### Coop activity
 
+<img src="docs/images/coop_run_detections.jpg" alt="The chicken run camera with 18 hens detected in one frame" width="900"/>
+
+<img src="docs/images/coop_run_closeup.jpg" alt="Close-up of the detected hens with confidence scores" width="900"/>
+
+*The run camera (`h8c`, 2304×1296) on 13 November: `chicken_detection` finds 18 hens in a single frame ("Kurka" = hen). The low-confidence boxes on partly hidden birds are why a custom poultry model is on the roadmap.*
+
 <img src="docs/images/coop_analytics.png" alt="Chicken activity over time and a heat-map of favourite spots in the run" width="900"/>
 
 The `/analytics/plot` endpoint renders this view for the chicken cameras (labels in Polish): the number of hens in view over time (*Rytm dobowy kurek*) and a density map of their favourite spots in the run (*Mapa ulubionych miejsc na wybiegu*).
