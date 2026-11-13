@@ -69,7 +69,9 @@ rules:
 Running five neural networks on 1440p streams on a CPU is not possible frame-by-frame, so the pipeline is built around **doing as little work as possible**:
 
 * **Motion gate first** — a downscaled background-subtraction `MotionFilter` decides whether anything moved, optionally only inside the camera's `motion_mask_polygon` (so wind in the trees outside the driveway is ignored). A parked car or an empty driveway costs almost nothing; the AI loop is skipped entirely.
-* **Per-detector FPS budget** — every camera declares its detectors with an `ai_fps` (e.g. cars at 1 FPS, chickens at 5 FPS). The worker runs each detector only when its interval has elapsed.
+* **Frame budget** — a camera hands at most `max_fps` frames per second (default 10) to the rest of the pipeline; every packet is still decoded, but only those frames are converted to arrays, motion-checked and streamed.
+* **Per-detector FPS budget** — every camera declares its detectors with an `ai_fps` (e.g. 1 FPS for cars and hens). The worker runs each detector only when its interval has elapsed.
+* **One inference at a time** — detectors and YOLO models are shared between cameras, and Ultralytics models are not thread-safe, so inference runs behind a single lock. On a CPU this is also faster than letting several models fight for the same cores.
 * **Off the event loop** — RTSP reading and H.264 decoding run in a thread per camera (with open/read timeouts), and inference runs in `asyncio.to_thread`, so one event loop serves all cameras, HTTP clients and workers without blocking.
 * **Event de-duplication** — a detection is published only when the scene actually changes:
 
@@ -81,7 +83,7 @@ Running five neural networks on 1440p streams on a CPU is not possible frame-by-
 | `scene_changed` | the PTZ camera moved to a different view |
 | `same_state_heartbeat` | periodic keep-alive for long, static presence |
 
-  The result: the archive contains **events**, not thousands of identical frames.
+  The result: the archive contains **events**, not thousands of identical frames. A still scene never counts as "the object left": only a detector run that finds nothing does, so a parked car is archived once.
 * **PTZ scene tracking** — a tile-based frame fingerprint (`SceneTracker`) detects when a PTZ camera switches view and resets the motion and detection state for the new scene.
 
 ### 🔎 Detectors
@@ -95,6 +97,18 @@ Running five neural networks on 1440p streams on a CPU is not possible frame-by-
 | `chicken_detection` | YOLOv8m (COCO *bird*) | counts and tracks hens in the coop (activity analytics) |
 
 Detectors implement one `BaseDetector` interface and are created lazily by a `DetectorProvider` factory; `DetectionModelProvider` caches weights so several detectors share one model instance.
+
+### ⏱️ Running on a CPU
+
+Everything runs on a CPU-only home PC (12 logical cores, no GPU). One 2304×1296 coop frame at `imgsz=768`:
+
+| Model | Time per frame |
+| :--- | ---: |
+| YOLOv8m (used for hens) | ~1.2 s |
+| YOLOv8s | ~0.64 s |
+| YOLOv8n (used for cars and people) | ~0.32 s |
+
+With three cameras (driveway: cars, plates, people; two coop cameras: hens) at 1 FPS per detector, the CPU is the limit, which is why the motion gate, the frame budget and the per-detector FPS budgets matter. The dashboard shows each camera's real FPS and detection time, so an overloaded camera is visible at a glance.
 
 ---
 
@@ -139,13 +153,17 @@ Every subscriber gets a bounded `asyncio.Queue` with a **latest-wins** policy: w
 
 ## 🖥️ Web UI
 
+<img src="docs/images/ui_dashboard.jpg" alt="Dashboard with three cameras, their live status, real resolution, FPS and detection time" width="900"/>
+
+*The dashboard: each card shows whether the stream is live, stalled or offline, the resolution actually received, the camera's FPS and how long its detectors take, refreshed every 2 seconds.*
+
 | Camera view | Event archive |
 | :---: | :---: |
 | <img src="docs/images/ui_camera_view.jpg" width="440"/> | <img src="docs/images/ui_archive.jpg" width="440"/> |
-| Live MJPEG stream with switchable AI overlays, detector config, rules and recent snapshots | Every de-duplicated event is stored as an annotated snapshot + a CSV row per bounding box |
+| Live MJPEG stream with switchable AI overlays, a status line (objects, FPS, detection time), detector config, rules and recent snapshots | Every de-duplicated event is stored as an annotated snapshot + a CSV row per bounding box |
 
-* **`/dashboard`** — grid of all active cameras (raw or AI thumbnails).
-* **`/view?cam=<id>`** — single camera with toggles for each detector, raw/AI mode, audio level and live transcript overlay.
+* **`/dashboard`** — grid of all active cameras (raw or AI thumbnails) with live stream health.
+* **`/view?cam=<id>`** — single camera with toggles for each detector, raw/AI mode, audio level and live transcript overlay. Boxes stay on screen while the scene is still, so a parked car keeps its box.
 * **`/archive`** — browsable snapshot archive per camera and stream session.
 * **`/analytics/plot`** — activity timeline and spatial heat-map (used to monitor chicken activity in the coop).
 
@@ -186,14 +204,15 @@ Charts are reproducible with [`tools/make_readme_charts.py`](tools/make_readme_c
 ## 🧩 Core Components Deep Dive
 
 * **`AppOrchestrator`** — composition root: builds the buses and managers, starts/stops everything from FastAPI's `lifespan`.
-* **`CameraDriver`** — opens RTSP over TCP with `nobuffer`/`low_delay`, demuxes video and audio, resamples audio to 16 kHz mono and reconnects automatically on errors.
+* **`CameraDriver`** — reads RTSP over TCP with `nobuffer`/`low_delay` in its own thread, with open/read timeouts; demuxes video and audio, resamples audio to 16 kHz mono, hands the newest frame to the event loop and reconnects automatically. Stream credentials are stripped from every logged error.
 * **`DetectionWorker`** — per-camera loop: scene check → motion gate → FPS-budgeted detectors → render cache → event de-duplication → publishes annotated frames and events.
-* **`AutomationRuleEngine`** — evaluates tripwire rules on AI frames with per-rule cooldowns.
+* **`AutomationRuleEngine`** — tests whether a ground point crossed a tripwire segment in the configured direction ([`tripwire.py`](src/infrastructure/automation/tripwire.py)), with per-rule cooldowns.
 * **`MultimodalGateAutomationEngine`** — correlates visual and speech events within a time window, with text normalisation (diacritics-insensitive phrase matching).
 * **`SpeechWorker` + `FasterWhisperSpeechRecognizer`** — sliding-window transcription (4 s window every 1 s; Whisper *small*, int8, Polish) with duplicate-text suppression; recognisers are swappable behind `BaseSpeechRecognizer`.
 * **`FaceIdentityStore`** — builds and hot-reloads an index of known faces from `data/faces/known/<person>/`.
-* **`ArchiveWriter`** — writes annotated snapshots and a long-format CSV used by analytics.
-* **`LiveStreamHandler` + `FrameRenderer`** — MJPEG encoder with FPS/quality/width limits, drawing boxes, tripwires, motion masks and the audio overlay.
+* **`ArchiveWriter`** — writes annotated snapshots (captioned with camera, detector, object count, archive reason and time) and a long-format CSV used by analytics.
+* **`LiveStreamHandler` + `FrameRenderer`** — MJPEG encoder with FPS/quality/width limits, drawing boxes, tripwires, motion masks, a status line and the audio overlay; sizes scale with the frame resolution.
+* **`CameraStatsRegistry`** — live per-camera health (stream state, real resolution, FPS, detector timings) behind the dashboard and `/status.json`.
 
 ---
 

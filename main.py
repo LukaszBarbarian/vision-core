@@ -1,3 +1,4 @@
+import logging
 import ssl
 from contextlib import asynccontextmanager
 
@@ -10,6 +11,16 @@ from presentation.api.routers.analytics import router as analytics_router
 from presentation.api.routers.streaming import router as cameras_router
 
 ssl._create_default_https_context = ssl._create_unverified_context
+
+
+class _SkipPolledEndpoints(logging.Filter):
+    """The dashboard polls /status.json every 2 s; keep it out of the access log."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "/status.json" not in record.getMessage()
+
+
+logging.getLogger("uvicorn.access").addFilter(_SkipPolledEndpoints())
 
 
 @asynccontextmanager
