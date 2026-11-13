@@ -20,6 +20,7 @@ class LiveStreamHandler:
         jpeg_quality: int = 75,
         max_fps: float = 12.0,
         max_width: int | None = None,
+        camera_stats=None,
     ):
         self.topic = topic
         self.frame_bus = frame_bus
@@ -31,6 +32,7 @@ class LiveStreamHandler:
 
         self.visible_types = set(visible_types or [])
         self.camera_config = camera_config
+        self.camera_stats = camera_stats
 
         self.jpeg_quality = max(25, min(95, int(jpeg_quality)))
         self.max_fps = max(0.5, float(max_fps))
@@ -101,6 +103,7 @@ class LiveStreamHandler:
             frame_ctx,
             self.visible_types,
             config=self.camera_config,
+            status_text=self._status_text(frame_ctx),
         )
 
         image = self._resize_for_stream(image)
@@ -120,6 +123,33 @@ class LiveStreamHandler:
             + buffer.tobytes()
             + b"\r\n"
         )
+
+    def _status_text(self, frame_ctx) -> str:
+        """One line on the frame: mode, objects in view, camera FPS, detector time."""
+        is_ai = bool(self.visible_types)
+        parts = ["AI" if is_ai else "RAW"]
+
+        if is_ai:
+            detections = [
+                d for d in (getattr(frame_ctx, "detections", None) or [])
+                if str(d.detection_type) in self.visible_types
+            ]
+            count = len(detections)
+            parts.append(f"{count} object" + ("" if count == 1 else "s"))
+
+        if self.camera_stats is not None:
+            stats = self.camera_stats.get(frame_ctx.camera_id)
+            parts.append(f"{stats.fps(time.time()):.1f} fps")
+
+            if is_ai:
+                timings = [
+                    ms for detection_type, ms in stats.inference_ms.items()
+                    if detection_type in self.visible_types
+                ]
+                if timings:
+                    parts.append(f"detect {sum(timings):.0f} ms")
+
+        return " | ".join(parts)
 
     def _resize_for_stream(self, image):
         if self.max_width is None:

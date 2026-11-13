@@ -299,7 +299,8 @@ python tools/replay_tripwire.py --cam dom_c1 --session <stream_session_id> \
 | Endpoint | Description |
 | :--- | :--- |
 | `GET /health` | health check |
-| `GET /dashboard` | all cameras |
+| `GET /dashboard` | all cameras, with live stream status, real resolution, FPS and detection time |
+| `GET /status.json` | live health of every active camera (live / stalled / offline, FPS, detector timings) |
 | `GET /view?cam=&detect=&raw=` | single-camera page |
 | `GET /stream?cam=&detect=&fps=&quality=&width=` | MJPEG stream (raw or AI-annotated) |
 | `GET /archive`, `/archive/{camera_id}`, `/archive/recent.json` | event archive |

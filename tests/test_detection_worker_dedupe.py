@@ -70,3 +70,37 @@ def test_still_scene_does_not_re_archive_a_parked_car():
     published = asyncio.run(scenario())
 
     assert [e["event_reason"] for e in published] == ["new_detection"]
+
+
+def test_parked_car_box_stays_visible_while_nothing_moves():
+    async def scenario():
+        frame_bus, event_bus = FrameBus(), EventBus()
+        ai_frames = frame_bus.subscribe("dom_c1_ai")
+
+        worker = DetectionWorker(
+            camera_id="dom_c1",
+            frame_bus=frame_bus,
+            event_bus=event_bus,
+            detector_provider=Provider(),
+            specs=[SimpleNamespace(detection_type="car_detection", ai_fps=1000)],
+        )
+        worker.detection_ttl_sec = 0.01  # would expire at once without the still-scene rule
+        motion = [True] + [False] * 3
+        worker.motion_filter = ScriptedMotion(motion)
+
+        task = asyncio.create_task(worker.run())
+        await asyncio.sleep(0.05)
+
+        image = np.zeros((720, 1280, 3), dtype=np.uint8)
+        seen = []
+        for frame_id in range(len(motion)):
+            await frame_bus.publish("dom_c1", FrameContext("dom_c1", frame_id, image))
+            await asyncio.sleep(0.05)
+            seen.append(len((await ai_frames.get()).detections))
+
+        worker.stop()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        return seen
+
+    assert asyncio.run(scenario()) == [1, 1, 1, 1]

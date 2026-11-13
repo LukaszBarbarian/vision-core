@@ -6,10 +6,11 @@ from application.orchestration.detection_worker import DetectionWorker
 
 
 class DetectionManager:
-    def __init__(self, frame_bus, event_bus, model_provider, settings, face_identity_store):
+    def __init__(self, frame_bus, event_bus, model_provider, settings, face_identity_store, camera_stats=None):
         self.frame_bus = frame_bus
         self.event_bus = event_bus
         self.settings = settings
+        self.camera_stats = camera_stats
         self.face_identity_store=face_identity_store
         self.model_provider = model_provider
 
@@ -47,6 +48,7 @@ class DetectionManager:
                 specs=config.detections,
                 scene_tracking_enabled=getattr(config.camera, "scene_tracking", False),
                 motion_roi_polygon=getattr(config.camera, "motion_mask_polygon", None),
+                camera_stats=self.camera_stats,
             )
 
             self.workers.append(worker)

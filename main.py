@@ -25,6 +25,7 @@ async def lifespan(app: FastAPI):
     app.state.event_bus = orchestrator.event_bus
 
     app.state.audio_overlay_state = orchestrator.audio_overlay_state
+    app.state.camera_stats = orchestrator.camera_stats
     app.state.face_identity_store = orchestrator.face_identity_store
 
     app.state.detector_provider = orchestrator.detection_manager.detector_provider

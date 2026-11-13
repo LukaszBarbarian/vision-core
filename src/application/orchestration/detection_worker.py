@@ -47,6 +47,7 @@ class DetectionWorker:
         specs,
         scene_tracking_enabled: bool = False,
         motion_roi_polygon: list | None = None,
+        camera_stats=None,
     ):
         self.camera_id = camera_id
         self.frame_bus = frame_bus
@@ -54,6 +55,7 @@ class DetectionWorker:
         self.detector_provider = detector_provider
         self.detectors: dict[str, BaseDetector] = {}
         self.specs = list(specs)
+        self.camera_stats = camera_stats
 
         for spec in self.specs:
             d_type = self._spec_type(spec)
@@ -83,10 +85,12 @@ class DetectionWorker:
         )
 
         # Render cache: detectors run at ai_fps, camera frames arrive faster.
-        # This keeps boxes visible between AI executions.
+        # Boxes stay visible until the next result of their detector replaces
+        # them, and indefinitely while nothing moves (the scene is unchanged).
+        # A box older than detection_ttl_sec while things move is dropped.
         self.last_detections_by_type: dict[str, list] = {}
         self.last_detection_time_by_type: dict[str, float] = {}
-        self.detection_ttl_sec = 1.25
+        self.detection_ttl_sec = 10.0
 
         # Archive/event dedupe: do not publish/save the same stationary box over
         # and over. A new event is emitted only when the scene, count, label set,
@@ -172,6 +176,9 @@ class DetectionWorker:
                                 context,
                             )
 
+                            if self.camera_stats is not None:
+                                self.camera_stats.record_inference(self.camera_id, detection_type, infer_ms)
+
                             if infer_ms + wait_ms > 150:
                                 print(
                                     f"[DetectionWorker] {self.camera_id}: "
@@ -211,6 +218,9 @@ class DetectionWorker:
                         event["snapshot_reason"] = reason
 
                         await self.event_bus.publish("detections", event)
+
+                if not has_motion:
+                    self._keep_render_cache_alive(now)
 
                 visible_detections = self._get_visible_detections(now)
 
@@ -289,6 +299,10 @@ class DetectionWorker:
                 visible.extend(detections)
 
         return visible
+
+    def _keep_render_cache_alive(self, now: float) -> None:
+        for detection_type in self.last_detections_by_type:
+            self.last_detection_time_by_type[detection_type] = now
 
     def _clear_render_cache(self) -> None:
         self.last_detections_by_type.clear()

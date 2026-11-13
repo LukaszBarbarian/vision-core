@@ -3,6 +3,7 @@ import numpy as np
 
 from domain.models.frame_context import FrameContext
 from infrastructure.ai_detection.detectors.base import BaseDetector
+from infrastructure.rendering.overlay import box_thickness, draw_info_bar, draw_label, ui_scale
 
 
 class FrameRenderer:
@@ -15,12 +16,14 @@ class FrameRenderer:
         frame_ctx: FrameContext,
         visible_types: set[str] | None = None,
         config=None,
+        status_text: str | None = None,
     ) -> np.ndarray:
         image = frame_ctx.frame_data.copy()
         detections = getattr(frame_ctx, "detections", []) or []
         height, width = image.shape[:2]
         visible_types = visible_types or set()
-        drawn = 0
+        thickness = box_thickness(image)
+        dot = max(4, round(4 * ui_scale(image)))
 
         # 1. RYSOWANIE POLIGONU MASKI RUCHU (Transparent Polygon)
         if config and hasattr(config.camera, 'motion_mask_polygon') and config.camera.motion_mask_polygon:
@@ -53,23 +56,19 @@ class FrameRenderer:
             color = self._get_color(detection_type)
             label = self._format_label(detection)
 
-            # Renderer tylko sprawdza, czy jakiś background worker oznaczył tę detekcję jako "triggered"
-            is_triggered = getattr(detection, "triggered", False)
-            if is_triggered:
-                color = (0, 0, 255)  # Zmiana na czerwony w strefie
-                label = f"[IN ZONE] {label}"
+            # The rule engine marks a detection whose ground point crossed a tripwire.
+            if getattr(detection, "triggered", False):
+                color = (0, 0, 255)
+                label = f"[CROSSED] {label}"
 
-            # Rysowanie ramki obiektu i punktów kontrolnych
-            cv2.rectangle(image, (x1, y1), (x2, y2), color, 2)
-            cv2.circle(image, (cx, cy), 4, color, -1)
-            cv2.circle(image, (cx, bottom_y), 5, (0, 0, 255), -1)  # Punkt styku
+            cv2.rectangle(image, (x1, y1), (x2, y2), color, thickness)
+            cv2.circle(image, (cx, cy), dot, color, -1)
+            cv2.circle(image, (cx, bottom_y), dot + 1, (0, 0, 255), -1)  # ground point
 
-            self._draw_label(image=image, text=label, x=x1, y=y1, color=color)
-            drawn += 1
+            draw_label(image, label, x1, y1, color)
 
-        self._draw_debug_header(
-            image=image, frame_ctx=frame_ctx, detections_count=len(detections), drawn_count=drawn
-        )
+        if status_text:
+            draw_info_bar(image, status_text, corner="top-right")
 
         self._draw_audio_overlay(image=image, camera_id=frame_ctx.camera_id)
 
@@ -94,13 +93,10 @@ class FrameRenderer:
                 line = rule.get("line")
                 if line and len(line) == 2:
                     p1, p2 = tuple(line[0]), tuple(line[1])
-                    cv2.line(image, p1, p2, (0, 0, 255), 3, lineType=cv2.LINE_AA)
-                    
+                    cv2.line(image, p1, p2, (0, 0, 255), box_thickness(image) + 1, lineType=cv2.LINE_AA)
+
                     rule_name = str(rule.get("name", "tripwire")).upper()
-                    cv2.putText(
-                        image, rule_name, (p1[0], p1[1] - 10), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2, lineType=cv2.LINE_AA
-                    )
+                    draw_label(image, rule_name, p1[0], p1[1], (0, 0, 255))
 
     def _get_color(self, detection_type: str) -> tuple[int, int, int]:
         try:
@@ -116,35 +112,6 @@ class FrameRenderer:
         if hasattr(detection, "track_id") and detection.track_id is not None:
             text = f"ID:{detection.track_id} {text}"
         return text
-
-    def _draw_label(self, image, text: str, x: int, y: int, color: tuple[int, int, int]) -> None:
-        height, width = image.shape[:2]
-        font, font_scale, thickness = cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2
-        (text_width, text_height), baseline = cv2.getTextSize(text, font, font_scale, thickness)
-
-        text_x = x
-        text_y = max(text_height + baseline + 8, y - 6)
-
-        bg_x1, bg_y1 = text_x, max(0, text_y - text_height - baseline - 6)
-        bg_x2, bg_y2 = min(width - 1, text_x + text_width + 8), min(height - 1, text_y + baseline)
-
-        cv2.rectangle(image, (bg_x1, bg_y1), (bg_x2, bg_y2), color, cv2.FILLED)
-        cv2.putText(image, text, (text_x + 4, text_y - 4), font, font_scale, (0, 0, 0), thickness, lineType=cv2.LINE_AA)
-
-    def _draw_debug_header(self, image, frame_ctx: FrameContext, detections_count: int, drawn_count: int) -> None:
-        debug_text = (
-            f"{frame_ctx.camera_id} | frame={frame_ctx.frame_id} | "
-            f"scene={getattr(frame_ctx, 'scene_id', None)} | "
-            f"detections={detections_count} | drawn={drawn_count}"
-        )
-        _, width = image.shape[:2]
-        font, font_scale, thickness = cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3
-        (text_width, _), _ = cv2.getTextSize(debug_text, font, font_scale, thickness)
-        
-        x_pos, y_pos = width - text_width - 20, 30
-        cv2.putText(image, debug_text, (x_pos, y_pos), font, font_scale, (0, 0, 0), thickness + 2, lineType=cv2.LINE_AA)
-        cv2.putText(image, debug_text, (x_pos, y_pos), font, font_scale, (255, 255, 255), thickness, lineType=cv2.LINE_AA)
-
 
     def _draw_audio_overlay(self, image: np.ndarray, camera_id: str) -> None:
         if self.audio_overlay_state is None:

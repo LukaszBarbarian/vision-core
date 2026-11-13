@@ -5,6 +5,8 @@ from pathlib import Path
 
 import cv2
 
+from infrastructure.rendering.overlay import box_thickness, draw_info_bar, draw_label
+
 
 class ArchiveWriter:
     def __init__(
@@ -110,6 +112,7 @@ class ArchiveWriter:
 
         if self.draw_boxes_on_snapshots:
             self._draw_boxes(image, boxes, detection_type)
+            draw_info_bar(image, self._snapshot_caption(event, camera_id, detection_type, boxes))
 
         ok = cv2.imwrite(
             str(snapshot_file),
@@ -220,48 +223,23 @@ class ArchiveWriter:
                 except (TypeError, ValueError):
                     pass
 
-            cv2.rectangle(image, (x1, y1), (x2, y2), color, 2)
-            self._draw_label(image, label, x1, y1, color)
+            cv2.rectangle(image, (x1, y1), (x2, y2), color, box_thickness(image))
+            draw_label(image, label, x1, y1, color)
 
-    def _draw_label(
-        self,
-        image,
-        text: str,
-        x: int,
-        y: int,
-        color: tuple[int, int, int],
-    ) -> None:
-        height, width = image.shape[:2]
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 0.75
-        thickness = 2
+    def _snapshot_caption(self, event: dict, camera_id: str, detection_type: str, boxes: list[dict]) -> str:
+        """Camera, detector, object count, why the event was archived and when."""
+        count = len(boxes)
+        parts = [camera_id, detection_type, f"{count} object" + ("" if count == 1 else "s")]
 
-        (text_width, text_height), baseline = cv2.getTextSize(
-            text,
-            font,
-            font_scale,
-            thickness,
-        )
+        reason = event.get("event_reason")
+        if reason:
+            parts.append(str(reason))
 
-        text_x = x
-        text_y = max(text_height + baseline + 8, y - 6)
+        timestamp = event.get("timestamp")
+        if timestamp:
+            parts.append(datetime.fromtimestamp(float(timestamp)).strftime("%H:%M:%S"))
 
-        bg_x1 = text_x
-        bg_y1 = max(0, text_y - text_height - baseline - 6)
-        bg_x2 = min(width - 1, text_x + text_width + 8)
-        bg_y2 = min(height - 1, text_y + baseline)
-
-        cv2.rectangle(image, (bg_x1, bg_y1), (bg_x2, bg_y2), color, cv2.FILLED)
-        cv2.putText(
-            image,
-            text,
-            (text_x + 4, text_y - 4),
-            font,
-            font_scale,
-            (0, 0, 0),
-            thickness,
-            lineType=cv2.LINE_AA,
-        )
+        return " | ".join(parts)
 
     def _color_for_detection_type(self, detection_type: str) -> tuple[int, int, int]:
         colors = {

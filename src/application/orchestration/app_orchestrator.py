@@ -9,6 +9,7 @@ from application.orchestration.detection_manager import DetectionManager
 from application.orchestration.speech_manager import SpeechManager
 
 from application.runtime.audio_overlay_state import AudioOverlayState
+from application.runtime.camera_stats import CameraStatsRegistry
 from infrastructure.ai_detection.face_identity_store import FaceIdentityStore
 from infrastructure.ai_detection.providers.model_provider import DetectionModelProvider
 from infrastructure.archive.archive_writer import ArchiveWriter
@@ -33,6 +34,7 @@ class AppOrchestrator:
         self.event_bus = EventBus()
 
         self.audio_overlay_state = AudioOverlayState()
+        self.camera_stats = CameraStatsRegistry()
 
         self.face_identity_store = FaceIdentityStore(
             known_faces_dir="data/faces/known",
@@ -50,6 +52,7 @@ class AppOrchestrator:
             audio_bus=self.audio_bus,
             event_bus=self.event_bus,
             settings=settings,
+            camera_stats=self.camera_stats,
         )
 
         self.detection_manager = DetectionManager(
@@ -58,6 +61,7 @@ class AppOrchestrator:
             model_provider=self.model_provider,
             settings=settings,
             face_identity_store=self.face_identity_store,
+            camera_stats=self.camera_stats,
         )
 
         self.speech_manager = SpeechManager(

@@ -65,6 +65,29 @@ def get_detector_provider(request: Request):
     return None
 
 
+def _camera_status(request: Request, camera_id: str) -> dict:
+    """Live stream health from the runtime stats (empty when unavailable)."""
+    stats = getattr(request.app.state, "camera_stats", None)
+    return stats.snapshot(camera_id) if stats is not None else {}
+
+
+def _live_resolution(request: Request, camera_id: str, config) -> str:
+    """Resolution of the frames actually received, falling back to the configured one."""
+    return _camera_status(request, camera_id).get("resolution") or getattr(config.camera, "resolution", "")
+
+
+def _format_stream_status(status: dict) -> str:
+    state = status.get("status", "offline")
+    if state == "live":
+        return f"live · {status.get('fps', 0):.1f} fps"
+    return state
+
+
+def _format_detect_time(status: dict) -> str:
+    timings = status.get("inference_ms") or {}
+    return f"{sum(timings.values())} ms" if timings else "—"
+
+
 def _escape(value) -> str:
     return html.escape(str(value or ""))
 
@@ -689,6 +712,16 @@ def _base_css() -> str:
         flex: 0 0 auto;
     }
 
+    .status-dot.stalled {
+        background: var(--accent);
+        box-shadow: 0 0 0 5px rgba(245, 158, 11, 0.18);
+    }
+
+    .status-dot.offline {
+        background: var(--red);
+        box-shadow: 0 0 0 5px rgba(239, 68, 68, 0.18);
+    }
+
     .meta-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -1052,12 +1085,25 @@ async def get_live_stream(
         jpeg_quality=quality,
         max_fps=fps,
         max_width=width,
+        camera_stats=getattr(request.app.state, "camera_stats", None),
     )
 
     return StreamingResponse(
         handler.generate_mjpeg_stream(),
         media_type="multipart/x-mixed-replace; boundary=frame",
     )
+
+
+@router.get(
+    "/status.json",
+    summary="Live stream health of every active camera",
+)
+def status_json(request: Request, settings=Depends(get_settings)):
+    return JSONResponse({
+        camera_id: _camera_status(request, camera_id)
+        for camera_id, config in settings.registry.items()
+        if getattr(config.camera, "active", False)
+    })
 
 
 @router.get(
@@ -1111,11 +1157,13 @@ def dashboard_page(
 
         name = _escape(getattr(config.camera, "name", camera_id))
         manufacturer = _escape(getattr(config.camera, "manufacturer", ""))
-        resolution = _escape(getattr(config.camera, "resolution", ""))
+        status = _camera_status(request, camera_id)
+        resolution = _escape(_live_resolution(request, camera_id, config))
+        dot_state = _escape(status.get("status", "offline"))
 
         cards_html.append(
             f"""
-            <article class="camera-card">
+            <article class="camera-card" data-camera="{_escape(camera_id)}">
                 <a class="thumb-link" href="{ai_view_url}">
                     <img class="thumb" src="{thumbnail_url}" alt="{name}">
                     <div class="thumb-overlay">
@@ -1129,7 +1177,7 @@ def dashboard_page(
                             <h2>{name}</h2>
                             <div class="camera-id">{_escape(camera_id)}</div>
                         </div>
-                        <span class="status-dot"></span>
+                        <span class="status-dot {dot_state}" title="{dot_state}"></span>
                     </div>
 
                     <div class="meta-grid">
@@ -1139,7 +1187,15 @@ def dashboard_page(
                         </div>
                         <div>
                             <span class="meta-label">Resolution</span>
-                            <strong>{resolution}</strong>
+                            <strong class="js-resolution">{resolution}</strong>
+                        </div>
+                        <div>
+                            <span class="meta-label">Stream</span>
+                            <strong class="js-stream">{_escape(_format_stream_status(status))}</strong>
+                        </div>
+                        <div>
+                            <span class="meta-label">Detection time</span>
+                            <strong class="js-detect">{_escape(_format_detect_time(status))}</strong>
                         </div>
                     </div>
 
@@ -1218,6 +1274,36 @@ def dashboard_page(
                     {cards}
                 </section>
             </main>
+            <script>
+                async function refreshStatus() {{
+                    try {{
+                        const response = await fetch("/status.json", {{ cache: "no-store" }});
+                        if (!response.ok) return;
+                        const cameras = await response.json();
+
+                        for (const card of document.querySelectorAll("[data-camera]")) {{
+                            const s = cameras[card.dataset.camera];
+                            if (!s) continue;
+
+                            const dot = card.querySelector(".status-dot");
+                            dot.className = "status-dot " + s.status;
+                            dot.title = s.status + (s.last_error ? " - " + s.last_error : "");
+
+                            if (s.resolution) card.querySelector(".js-resolution").textContent = s.resolution;
+                            card.querySelector(".js-stream").textContent =
+                                s.status === "live" ? `live · ${{s.fps.toFixed(1)}} fps` : s.status;
+
+                            const timings = Object.values(s.inference_ms || {{}});
+                            card.querySelector(".js-detect").textContent =
+                                timings.length ? `${{timings.reduce((a, b) => a + b, 0)}} ms` : "—";
+                        }}
+                    }} catch (error) {{
+                        // server restarting: keep the last known values
+                    }}
+                }}
+
+                setInterval(refreshStatus, 2000);
+            </script>
         </body>
     </html>
     """
@@ -1275,7 +1361,7 @@ def view_camera_page(
 
     name = _escape(getattr(config.camera, "name", camera_id))
     manufacturer = _escape(getattr(config.camera, "manufacturer", ""))
-    resolution = _escape(getattr(config.camera, "resolution", ""))
+    resolution = _escape(_live_resolution(request, camera_id, config))
 
     ai_button_class = "button primary active" if not raw else "button"
     raw_button_class = "button primary active" if raw else "button"

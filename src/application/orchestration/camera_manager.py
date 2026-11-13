@@ -9,11 +9,12 @@ from infrastructure.cameras.camera_driver import CameraDriver
 
 
 class CameraManager:
-    def __init__(self, frame_bus, audio_bus, event_bus, settings):
+    def __init__(self, frame_bus, audio_bus, event_bus, settings, camera_stats=None):
         self.frame_bus = frame_bus
         self.audio_bus = audio_bus
         self.event_bus = event_bus
         self.settings = settings
+        self.camera_stats = camera_stats
 
         self.drivers: list[CameraDriver] = []
         self.tasks: list[asyncio.Task] = []
@@ -33,7 +34,8 @@ class CameraManager:
                 frame_bus=self.frame_bus,
                 audio_bus=self.audio_bus,
                 audio_sample_rate=16000,
-                audio_chunk_seconds=1.0
+                audio_chunk_seconds=1.0,
+                camera_stats=self.camera_stats,
             )
 
             self.drivers.append(driver)

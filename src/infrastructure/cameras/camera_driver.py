@@ -37,6 +37,7 @@ class CameraDriver:
         debug_audio: bool = False,
         open_timeout_seconds: float = 10.0,
         read_timeout_seconds: float = 10.0,
+        camera_stats=None,
     ):
         self.config = config
         self.frame_bus = frame_bus
@@ -47,6 +48,7 @@ class CameraDriver:
         self.debug_audio = bool(debug_audio)
         self.open_timeout_seconds = float(open_timeout_seconds)
         self.read_timeout_seconds = float(read_timeout_seconds)
+        self.camera_stats = camera_stats
 
         self.running = False
 
@@ -87,6 +89,11 @@ class CameraDriver:
                     )
 
                 except Exception as ex:
+                    if self.camera_stats is not None:
+                        self.camera_stats.record_connection(
+                            camera_id, connected=False, error=redact_credentials(ex)
+                        )
+
                     print(f"[{camera_id}] Driver error: {redact_credentials(ex)}")
                     print(redact_credentials(traceback.format_exc()))
 
@@ -132,6 +139,9 @@ class CameraDriver:
                 f"{camera_id}-"
                 f"{datetime.now().strftime('%Y%m%d-%H%M%S')}"
             )
+
+            if self.camera_stats is not None:
+                self.camera_stats.record_connection(camera_id, connected=True)
 
             print(
                 f"[{camera_id}] Stream opened. "
@@ -180,6 +190,9 @@ class CameraDriver:
                     )
 
         finally:
+            if self.camera_stats is not None:
+                self.camera_stats.record_connection(camera_id, connected=False)
+
             if container is not None:
                 try:
                     container.close()
@@ -206,6 +219,10 @@ class CameraDriver:
             self._frame_flush_scheduled = False
 
         if ctx is not None:
+            if self.camera_stats is not None:
+                height, width = ctx.frame_data.shape[:2]
+                self.camera_stats.record_frame(ctx.camera_id, width, height, ctx.timestamp)
+
             self._loop.create_task(self.frame_bus.publish(ctx.camera_id, ctx))
 
     def _post_audio(self, audio_ctx: AudioChunkContext) -> None:
