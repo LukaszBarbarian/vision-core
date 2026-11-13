@@ -205,13 +205,6 @@ class CameraDriver:
             self._pending_frame = None
             self._frame_flush_scheduled = False
 
-        # Every packet must be decoded, but only up to max_fps frames per second
-        # are converted to BGR arrays and published: nothing downstream needs
-        # more, and each 1440p conversion costs CPU.
-        max_fps = float(getattr(config.camera, "max_fps", 10.0) or 0.0)
-        self._min_frame_interval = 1.0 / max_fps if max_fps > 0 else 0.0
-        self._last_frame_published = 0.0
-
         if ctx is not None:
             self._loop.create_task(self.frame_bus.publish(ctx.camera_id, ctx))
 
