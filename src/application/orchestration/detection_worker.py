@@ -1,5 +1,6 @@
 import asyncio
 import math
+import threading
 import time
 import traceback
 from dataclasses import dataclass
@@ -14,6 +15,24 @@ from infrastructure.archive.scene_tracker import SceneTracker
 
 if TYPE_CHECKING:
     from infrastructure.ai_detection.providers.detector_provider import DetectorProvider
+
+
+# Detector and model instances are shared between cameras, and Ultralytics
+# models are not safe to call from several threads at once. On a CPU, running
+# inferences one at a time is also faster than letting them fight for cores.
+_INFERENCE_LOCK = threading.Lock()
+
+
+def _run_detector(detector, frame, context) -> tuple[list, float, float]:
+    """Runs one detector under the shared lock; returns (detections, wait_ms, infer_ms)."""
+    t0 = time.perf_counter()
+
+    with _INFERENCE_LOCK:
+        t1 = time.perf_counter()
+        detections = detector.execute(frame, context)
+        t2 = time.perf_counter()
+
+    return detections, (t1 - t0) * 1000.0, (t2 - t1) * 1000.0
 
 
 
@@ -146,20 +165,18 @@ class DetectionWorker:
                         detector = self.detectors[detection_type]
 
                         try:
-                            t0 = time.perf_counter()
-
-                            detections = await asyncio.to_thread(
-                                detector.execute,
+                            detections, wait_ms, infer_ms = await asyncio.to_thread(
+                                _run_detector,
+                                detector,
                                 frame_ctx.frame_data,
                                 context,
                             )
 
-                            elapsed_ms = (time.perf_counter() - t0) * 1000.0
-
-                            if elapsed_ms > 150:
+                            if infer_ms + wait_ms > 150:
                                 print(
                                     f"[DetectionWorker] {self.camera_id}: "
-                                    f"{detection_type} took {elapsed_ms:.1f} ms, "
+                                    f"{detection_type} took {infer_ms:.1f} ms "
+                                    f"(+{wait_ms:.0f} ms queued), "
                                     f"detections={len(detections or [])}"
                                 )
                         except Exception:

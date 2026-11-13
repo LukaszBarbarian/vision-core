@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import threading
 import time
 import traceback
@@ -17,6 +18,14 @@ from domain.models.audio_chunk_context import AudioChunkContext
 from domain.models.frame_context import FrameContext
 
 
+_URL_CREDENTIALS = re.compile(r"(\w+://)[^/@\s]+@")
+
+
+def redact_credentials(text: str) -> str:
+    """Hides user:password in stream URLs so they never reach the logs."""
+    return _URL_CREDENTIALS.sub(lambda m: m.group(1) + "***@", str(text))
+
+
 class CameraDriver:
     def __init__(
         self,
@@ -27,7 +36,7 @@ class CameraDriver:
         audio_chunk_seconds: float = 1.0,
         debug_audio: bool = False,
         open_timeout_seconds: float = 10.0,
-        read_timeout_seconds: float = 5.0,
+        read_timeout_seconds: float = 10.0,
     ):
         self.config = config
         self.frame_bus = frame_bus
@@ -50,6 +59,13 @@ class CameraDriver:
         self._pending_frame: FrameContext | None = None
         self._frame_flush_scheduled = False
 
+        # Every packet must be decoded, but only up to max_fps frames per second
+        # are converted to BGR arrays and published: nothing downstream needs
+        # more, and each 1440p conversion costs CPU.
+        max_fps = float(getattr(config.camera, "max_fps", 10.0) or 0.0)
+        self._min_frame_interval = 1.0 / max_fps if max_fps > 0 else 0.0
+        self._last_frame_published = 0.0
+
     async def run(self):
         self.running = True
         self._loop = asyncio.get_running_loop()
@@ -63,9 +79,16 @@ class CameraDriver:
                 except asyncio.CancelledError:
                     raise
 
+                except av.error.ExitError:
+                    # PyAV's read timeout fired: the camera sent nothing for that long.
+                    print(
+                        f"[{camera_id}] No data for {self.read_timeout_seconds:.0f}s "
+                        f"(stream stalled), reconnecting..."
+                    )
+
                 except Exception as ex:
-                    print(f"[{camera_id}] Driver error: {ex}")
-                    traceback.print_exc()
+                    print(f"[{camera_id}] Driver error: {redact_credentials(ex)}")
+                    print(redact_credentials(traceback.format_exc()))
 
                     if self.running:
                         print(f"[{camera_id}] Reconnecting in 2s...")
@@ -182,6 +205,13 @@ class CameraDriver:
             self._pending_frame = None
             self._frame_flush_scheduled = False
 
+        # Every packet must be decoded, but only up to max_fps frames per second
+        # are converted to BGR arrays and published: nothing downstream needs
+        # more, and each 1440p conversion costs CPU.
+        max_fps = float(getattr(config.camera, "max_fps", 10.0) or 0.0)
+        self._min_frame_interval = 1.0 / max_fps if max_fps > 0 else 0.0
+        self._last_frame_published = 0.0
+
         if ctx is not None:
             self._loop.create_task(self.frame_bus.publish(ctx.camera_id, ctx))
 
@@ -261,6 +291,13 @@ class CameraDriver:
             return frame_id
 
         for frame in frames:
+            now = time.monotonic()
+
+            if now - self._last_frame_published < self._min_frame_interval:
+                frame_id += 1
+                continue
+
+            self._last_frame_published = now
             img = frame.to_ndarray(format="bgr24")
 
             ctx = FrameContext(
