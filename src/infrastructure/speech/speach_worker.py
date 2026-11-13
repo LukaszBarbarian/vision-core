@@ -60,14 +60,20 @@ class SpeechWorker:
             while self.running:
                 audio_ctx = await queue.get()
 
-                if audio_ctx is None:
+                # Chunks keep arriving while the recogniser runs; take all of
+                # them so the next window is the newest, gap-free audio.
+                for chunk in [audio_ctx, *self._drain(queue)]:
+                    if chunk is None:
+                        continue
+
+                    if self.audio_overlay_state is not None:
+                        self.audio_overlay_state.update_audio_chunk(chunk)
+
+                    self.buffer.append(chunk)
+
+                if not self.buffer:
                     continue
 
-                if self.audio_overlay_state is not None:
-                    self.audio_overlay_state.update_audio_chunk(audio_ctx)
-
-
-                self.buffer.append(audio_ctx)
                 self._trim_buffer()
 
                 now = time.time()
@@ -142,6 +148,16 @@ class SpeechWorker:
 
     def stop(self):
         self.running = False
+
+    @staticmethod
+    def _drain(queue: asyncio.Queue) -> list:
+        chunks = []
+
+        while True:
+            try:
+                chunks.append(queue.get_nowait())
+            except asyncio.QueueEmpty:
+                return chunks
 
     def _trim_buffer(self):
         if not self.buffer:
