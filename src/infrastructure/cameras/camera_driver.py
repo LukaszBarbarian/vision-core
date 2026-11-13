@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 import traceback
 from datetime import datetime
@@ -25,6 +26,8 @@ class CameraDriver:
         audio_sample_rate: int = 16000,
         audio_chunk_seconds: float = 1.0,
         debug_audio: bool = False,
+        open_timeout_seconds: float = 10.0,
+        read_timeout_seconds: float = 5.0,
     ):
         self.config = config
         self.frame_bus = frame_bus
@@ -33,108 +36,161 @@ class CameraDriver:
         self.audio_sample_rate = int(audio_sample_rate)
         self.audio_chunk_seconds = float(audio_chunk_seconds)
         self.debug_audio = bool(debug_audio)
+        self.open_timeout_seconds = float(open_timeout_seconds)
+        self.read_timeout_seconds = float(read_timeout_seconds)
 
         self.running = False
 
+        # The RTSP reader runs in its own thread so network stalls and H.264
+        # decoding never block the event loop. Frames are handed over through
+        # a single latest-wins slot, so a busy loop sees fresh frames instead
+        # of a growing backlog.
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._frame_lock = threading.Lock()
+        self._pending_frame: FrameContext | None = None
+        self._frame_flush_scheduled = False
+
     async def run(self):
         self.running = True
+        self._loop = asyncio.get_running_loop()
         camera_id = self.config.camera.id
 
-        while self.running:
-            container = None
+        try:
+            while self.running:
+                try:
+                    await asyncio.to_thread(self._read_session)
 
-            try:
-                print(f"[{camera_id}] Opening RTSP stream...")
+                except asyncio.CancelledError:
+                    raise
 
-                container = av.open(
-                    self.config.camera.url,
-                    options={
-                        "rtsp_transport": "tcp",
-                        "fflags": "nobuffer",
-                        "flags": "low_delay",
-                    },
-                )
+                except Exception as ex:
+                    print(f"[{camera_id}] Driver error: {ex}")
+                    traceback.print_exc()
 
-                video_stream = self._get_video_stream(container)
-                audio_stream = self._get_audio_stream(container)
+                    if self.running:
+                        print(f"[{camera_id}] Reconnecting in 2s...")
+                        await asyncio.sleep(2)
 
-                streams = [video_stream]
+                await asyncio.sleep(0.5)
 
-                if audio_stream is not None:
-                    streams.append(audio_stream)
-
-                stream_session_id = (
-                    f"{camera_id}-"
-                    f"{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-                )
-
-                print(
-                    f"[{camera_id}] Stream opened. "
-                    f"session={stream_session_id}, "
-                    f"audio={'yes' if audio_stream is not None else 'no'}"
-                )
-
-                frame_id = 0
-                audio_chunk_id = 0
-
-                audio_resampler = None
-                audio_fifo = None
-                samples_per_chunk = int(
-                    self.audio_sample_rate * self.audio_chunk_seconds
-                )
-
-                if audio_stream is not None:
-                    audio_resampler = AudioResampler(
-                        format="s16",
-                        layout="mono",
-                        rate=self.audio_sample_rate,
-                    )
-                    audio_fifo = AudioFifo()
-
-                for packet in container.demux(*streams):
-                    if not self.running:
-                        break
-
-                    if packet.stream == video_stream:
-                        frame_id = await self._handle_video_packet(
-                            packet=packet,
-                            camera_id=camera_id,
-                            frame_id=frame_id,
-                            stream_session_id=stream_session_id,
-                        )
-
-                    elif audio_stream is not None and packet.stream == audio_stream:
-                        audio_chunk_id, audio_fifo = await self._handle_audio_packet(
-                            packet=packet,
-                            camera_id=camera_id,
-                            audio_chunk_id=audio_chunk_id,
-                            stream_session_id=stream_session_id,
-                            audio_resampler=audio_resampler,
-                            audio_fifo=audio_fifo,
-                            samples_per_chunk=samples_per_chunk,
-                        )
-
-                    await asyncio.sleep(0)
-
-            except asyncio.CancelledError:
-                raise
-
-            except Exception as ex:
-                print(f"[{camera_id}] Driver error: {ex}")
-                traceback.print_exc()
-                print(f"[{camera_id}] Reconnecting in 2s...")
-                await asyncio.sleep(2)
-
-            finally:
-                if container is not None:
-                    try:
-                        container.close()
-                    except Exception:
-                        pass
-
-            await asyncio.sleep(0.5)
+        finally:
+            # Lets the reader thread leave its loop at the next packet or read timeout.
+            self.running = False
 
         print(f"[{camera_id}] Driver stopped.")
+
+    def _read_session(self) -> None:
+        """Blocking: opens the RTSP stream and reads it until it ends or the driver stops."""
+        camera_id = self.config.camera.id
+        container = None
+
+        try:
+            print(f"[{camera_id}] Opening RTSP stream...")
+
+            container = av.open(
+                self.config.camera.url,
+                options={
+                    "rtsp_transport": "tcp",
+                    "fflags": "nobuffer",
+                    "flags": "low_delay",
+                },
+                timeout=(self.open_timeout_seconds, self.read_timeout_seconds),
+            )
+
+            video_stream = self._get_video_stream(container)
+            audio_stream = self._get_audio_stream(container)
+
+            streams = [video_stream]
+
+            if audio_stream is not None:
+                streams.append(audio_stream)
+
+            stream_session_id = (
+                f"{camera_id}-"
+                f"{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            )
+
+            print(
+                f"[{camera_id}] Stream opened. "
+                f"session={stream_session_id}, "
+                f"audio={'yes' if audio_stream is not None else 'no'}"
+            )
+
+            frame_id = 0
+            audio_chunk_id = 0
+
+            audio_resampler = None
+            audio_fifo = None
+            samples_per_chunk = int(
+                self.audio_sample_rate * self.audio_chunk_seconds
+            )
+
+            if audio_stream is not None:
+                audio_resampler = AudioResampler(
+                    format="s16",
+                    layout="mono",
+                    rate=self.audio_sample_rate,
+                )
+                audio_fifo = AudioFifo()
+
+            for packet in container.demux(*streams):
+                if not self.running:
+                    break
+
+                if packet.stream == video_stream:
+                    frame_id = self._handle_video_packet(
+                        packet=packet,
+                        camera_id=camera_id,
+                        frame_id=frame_id,
+                        stream_session_id=stream_session_id,
+                    )
+
+                elif audio_stream is not None and packet.stream == audio_stream:
+                    audio_chunk_id, audio_fifo = self._handle_audio_packet(
+                        packet=packet,
+                        camera_id=camera_id,
+                        audio_chunk_id=audio_chunk_id,
+                        stream_session_id=stream_session_id,
+                        audio_resampler=audio_resampler,
+                        audio_fifo=audio_fifo,
+                        samples_per_chunk=samples_per_chunk,
+                    )
+
+        finally:
+            if container is not None:
+                try:
+                    container.close()
+                except Exception:
+                    pass
+
+    def _post_frame(self, ctx: FrameContext) -> None:
+        """Called from the reader thread: keeps only the newest frame for the loop."""
+        with self._frame_lock:
+            self._pending_frame = ctx
+
+            if self._frame_flush_scheduled:
+                return
+
+            self._frame_flush_scheduled = True
+
+        self._loop.call_soon_threadsafe(self._flush_frame)
+
+    def _flush_frame(self) -> None:
+        """Runs on the event loop."""
+        with self._frame_lock:
+            ctx = self._pending_frame
+            self._pending_frame = None
+            self._frame_flush_scheduled = False
+
+        if ctx is not None:
+            self._loop.create_task(self.frame_bus.publish(ctx.camera_id, ctx))
+
+    def _post_audio(self, audio_ctx: AudioChunkContext) -> None:
+        """Called from the reader thread: audio chunks are small and must not be dropped."""
+        asyncio.run_coroutine_threadsafe(
+            self.audio_bus.publish(audio_ctx.camera_id, audio_ctx),
+            self._loop,
+        )
 
     def stop(self):
         self.running = False
@@ -190,7 +246,7 @@ class CameraDriver:
 
         return stream
 
-    async def _handle_video_packet(
+    def _handle_video_packet(
         self,
         packet,
         camera_id: str,
@@ -215,14 +271,13 @@ class CameraDriver:
                 stream_session_id=stream_session_id,
             )
 
-            await self.frame_bus.publish(camera_id, ctx)
+            self._post_frame(ctx)
 
             frame_id += 1
-            await asyncio.sleep(0)
 
         return frame_id
 
-    async def _handle_audio_packet(
+    def _handle_audio_packet(
         self,
         packet,
         camera_id: str,
@@ -321,7 +376,7 @@ class CameraDriver:
                     stream_session_id=stream_session_id,
                 )
 
-                await self.audio_bus.publish(camera_id, audio_ctx)
+                self._post_audio(audio_ctx)
 
                 if self.debug_audio:
                     print(
@@ -332,7 +387,6 @@ class CameraDriver:
                     )
 
                 audio_chunk_id += 1
-                await asyncio.sleep(0)
 
         return audio_chunk_id, audio_fifo
 

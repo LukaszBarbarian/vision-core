@@ -6,6 +6,8 @@ import asyncio
 import time
 import traceback
 
+from infrastructure.automation.tripwire import TripwireCrossingDetector, side_of_line
+
 
 class AutomationRuleEngine:
     def __init__(
@@ -21,6 +23,8 @@ class AutomationRuleEngine:
 
         self.last_triggered: dict[str, float] = {}
         self.cooldown_seconds = float(cooldown_seconds)
+
+        self.crossing_detectors: dict[str, TripwireCrossingDetector] = {}
 
         self.running = False
 
@@ -93,23 +97,22 @@ class AutomationRuleEngine:
         if not trigger_event:
             return
 
+        crossing_detector = self._get_crossing_detector(rule_name, rule)
+
+        candidates = {}
+
         for detection in detections:
-            detection_type = getattr(detection, "detection_type", None)
-
-            if detection_type not in target_classes:
+            if getattr(detection, "detection_type", None) not in target_classes:
                 continue
 
-            cx = int((detection.x1 + detection.x2) / 2)
-            bottom_y = int(detection.y2)
+            point = (int((detection.x1 + detection.x2) / 2), int(detection.y2))
+            candidates[(float(point[0]), float(point[1]))] = detection
 
-            crossed = self._is_point_on_trigger_side(
-                point=(cx, bottom_y),
-                line=line,
-            )
+        frame_ts = float(getattr(frame_ctx, "timestamp", None) or time.time())
+        crossings = crossing_detector.update(list(candidates), frame_ts)
 
-            if not crossed:
-                continue
-
+        for previous_point, current_point in crossings:
+            detection = candidates[current_point]
             detection.triggered = True
 
             now = time.time()
@@ -120,6 +123,8 @@ class AutomationRuleEngine:
                 continue
 
             self.last_triggered[cooldown_key] = now
+
+            cx, bottom_y = int(current_point[0]), int(current_point[1])
 
             event = {
                 "type": "tripwire.crossed",
@@ -135,6 +140,11 @@ class AutomationRuleEngine:
                     "x": cx,
                     "y": bottom_y,
                 },
+                "previous_point": {
+                    "x": int(previous_point[0]),
+                    "y": int(previous_point[1]),
+                },
+                "direction": crossing_detector.direction,
                 "line": line,
             }
 
@@ -146,21 +156,23 @@ class AutomationRuleEngine:
 
             await self.event_bus.publish(trigger_event, event)
 
+    def _get_crossing_detector(self, rule_name: str, rule: dict) -> TripwireCrossingDetector:
+        detector = self.crossing_detectors.get(rule_name)
+
+        if detector is None:
+            detector = TripwireCrossingDetector(
+                line=rule["line"],
+                direction=rule.get("direction", "to_trigger_side"),
+                max_gap_seconds=float(rule.get("max_gap_seconds", 3.0)),
+                max_jump_px=float(rule.get("max_jump_px", 600.0)),
+            )
+            self.crossing_detectors[rule_name] = detector
+
+        return detector
+
     def _is_point_on_trigger_side(
         self,
         point: tuple[int, int],
         line: list,
     ) -> bool:
-        px, py = point
-
-        x1 = int(line[0][0])
-        y1 = int(line[0][1])
-        x2 = int(line[1][0])
-        y2 = int(line[1][1])
-
-        cross_val = (
-            (px - x1) * (y2 - y1)
-            - (py - y1) * (x2 - x1)
-        )
-
-        return cross_val > 0
+        return side_of_line(point, line) > 0

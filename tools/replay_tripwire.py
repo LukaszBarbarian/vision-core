@@ -3,7 +3,7 @@ Offline replay of archived detections through the tripwire rule logic.
 
 Reads archive_logs/detections_long.csv + the archived snapshots of one camera
 session, evaluates every car box against the camera's tripwire rule with the
-same geometry the live AutomationRuleEngine uses, and renders an animated GIF:
+same crossing test the live AutomationRuleEngine uses, and renders an animated GIF:
 
     python tools/replay_tripwire.py --cam dom_c1 \
         --session dom_c1-20260703-111458 --from 114942 --to 115125 \
@@ -26,7 +26,7 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from infrastructure.automation.automation_orchestrator import AutomationRuleEngine  # noqa: E402
+from infrastructure.automation.tripwire import TripwireCrossingDetector, side_of_line  # noqa: E402
 from infrastructure.config.settings import Settings  # noqa: E402
 
 RED = (40, 40, 230)
@@ -118,7 +118,12 @@ def main():
     config = settings.registry[args.cam]
     rule = next(r for r in config.camera.rules if r.get("type") == "tripwire")
     rule = {**rule, "camera_id": args.cam}
-    engine = AutomationRuleEngine(frame_bus=None, event_bus=None, camera_config=config)
+    crossing = TripwireCrossingDetector(
+        line=rule["line"],
+        direction=rule.get("direction", "to_trigger_side"),
+        max_gap_seconds=float(rule.get("max_gap_seconds", 3.0)),
+        max_jump_px=float(rule.get("max_jump_px", 600.0)),
+    )
 
     df = pd.read_csv(ROOT / args.csv)
     df = df[
@@ -144,14 +149,15 @@ def main():
             continue
 
         cars = group[(group.label == "car") & (group.confidence >= 0.5)]
-        box, triggered = None, False
+        box, triggered, crossed = None, False, []
         if not cars.empty:
             row = cars.sort_values("confidence").iloc[-1]
             box = tuple(int(v) for v in (row.x1, row.y1, row.x2, row.y2))
             point = ((box[0] + box[2]) // 2, box[3])
-            triggered = engine._is_point_on_trigger_side(point=point, line=rule["line"])
+            crossed = crossing.update([point], group.ts.iloc[0].timestamp())
+            triggered = bool(crossed) or (armed_since is not None and side_of_line(point, rule["line"]) > 0)
 
-        if triggered and armed_since is None:
+        if box is not None and crossed and armed_since is None:
             armed_since = frame_id
 
         image = blur_plates(image, plate_model)

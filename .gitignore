@@ -10,3 +10,4 @@ data/
 *.xlsx
 *.csv
 ezviz_hp7-main
+.pytest_cache/

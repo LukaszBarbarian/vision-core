@@ -18,12 +18,18 @@ class MotionFilter:
         self.debug = bool(debug)
 
         self._backgrounds: dict[str, np.ndarray] = {}
+        self._roi_masks: dict[str, tuple[tuple, np.ndarray]] = {}
 
     def has_significant_motion(
         self,
         camera_id: str,
         frame: np.ndarray,
+        roi_polygon: list | None = None,
     ) -> bool:
+        """
+        True when something moved. With ``roi_polygon`` (frame pixel
+        coordinates) only motion inside the polygon counts.
+        """
         if frame is None or frame.size == 0:
             return False
 
@@ -62,6 +68,15 @@ class MotionFilter:
 
         thresh = cv2.dilate(thresh, None, iterations=2)
 
+        if roi_polygon:
+            roi_mask = self._get_roi_mask(
+                camera_id,
+                roi_polygon,
+                frame_shape=(original_h, original_w),
+                analysis_shape=thresh.shape[:2],
+            )
+            thresh = cv2.bitwise_and(thresh, roi_mask)
+
         contours, _ = cv2.findContours(
             thresh,
             cv2.RETR_EXTERNAL,
@@ -78,6 +93,32 @@ class MotionFilter:
 
     def reset(self, camera_id: str):
         self._backgrounds.pop(camera_id, None)
+
+    def _get_roi_mask(
+        self,
+        camera_id: str,
+        polygon: list,
+        frame_shape: tuple[int, int],
+        analysis_shape: tuple[int, int],
+    ) -> np.ndarray:
+        key = (tuple(map(tuple, polygon)), frame_shape, analysis_shape)
+        cached = self._roi_masks.get(camera_id)
+
+        if cached is not None and cached[0] == key:
+            return cached[1]
+
+        scale_x = analysis_shape[1] / float(frame_shape[1])
+        scale_y = analysis_shape[0] / float(frame_shape[0])
+        points = np.array(
+            [[x * scale_x, y * scale_y] for x, y in polygon],
+            dtype=np.int32,
+        )
+
+        mask = np.zeros(analysis_shape, dtype=np.uint8)
+        cv2.fillPoly(mask, [points], 255)
+
+        self._roi_masks[camera_id] = (key, mask)
+        return mask
 
     def _resize_for_analysis(self, frame: np.ndarray) -> np.ndarray:
         height, width = frame.shape[:2]

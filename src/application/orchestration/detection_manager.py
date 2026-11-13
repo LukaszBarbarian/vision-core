@@ -46,6 +46,7 @@ class DetectionManager:
                 detector_provider=self.detector_provider,
                 specs=config.detections,
                 scene_tracking_enabled=getattr(config.camera, "scene_tracking", False),
+                motion_roi_polygon=getattr(config.camera, "motion_mask_polygon", None),
             )
 
             self.workers.append(worker)

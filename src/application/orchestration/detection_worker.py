@@ -27,6 +27,7 @@ class DetectionWorker:
         detector_provider: "DetectorProvider",
         specs,
         scene_tracking_enabled: bool = False,
+        motion_roi_polygon: list | None = None,
     ):
         self.camera_id = camera_id
         self.frame_bus = frame_bus
@@ -48,6 +49,9 @@ class DetectionWorker:
 
         self.running = False
         self.motion_filter = MotionFilter()
+        # Motion only counts inside this polygon (frame pixel coordinates);
+        # empty means the whole frame.
+        self.motion_roi_polygon = list(motion_roi_polygon or [])
 
         # For static cameras keep a single logical scene and do not run visual
         # scene detection. For PTZ cameras set scene_tracking_enabled=True.
@@ -112,14 +116,11 @@ class DetectionWorker:
                     self._clear_render_cache()
                     self.motion_filter.reset(self.camera_id)
 
-                has_motion = self.motion_filter.has_significant_motion(self.camera_id, frame_ctx.frame_data)                    
-
-
-
-                #has_motion = True
-
-
-
+                has_motion = self.motion_filter.has_significant_motion(
+                    self.camera_id,
+                    frame_ctx.frame_data,
+                    roi_polygon=self.motion_roi_polygon,
+                )
 
                 context: dict[str, Any] = {
                     "clean_frame": frame_ctx.frame_data
@@ -128,6 +129,9 @@ class DetectionWorker:
                 frame_height = int(frame_ctx.frame_data.shape[0])
                 frame_width = int(frame_ctx.frame_data.shape[1])
 
+                # No motion: detectors are skipped. Absence is only concluded from a
+                # detector run that finds nothing, so a parked car keeps its
+                # archive state while the scene is still.
                 if has_motion:
 
                     for spec in self.specs:
@@ -190,13 +194,7 @@ class DetectionWorker:
                         event["snapshot_reason"] = reason
 
                         await self.event_bus.publish("detections", event)
-                else:
-                    # 💤 Brak ruchu: kompletnie olewamy pętlę AI. 
-                    # Możemy jedynie czyścić stan nieobecności, jeśli nic tam już nie ma.
-                    for spec in self.specs:
-                        self._handle_absence(self._spec_type(spec), now)
 
-                
                 visible_detections = self._get_visible_detections(now)
 
                 ai_frame_ctx = FrameContext(
